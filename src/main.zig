@@ -1,4 +1,7 @@
 const std = @import("std");
+// This needs to be public for the test
+// at the end of this file to work.
+pub const lexer = @import("./lexer.zig");
 
 const MainError = error{
     WrongUsage,
@@ -8,6 +11,7 @@ pub fn main() !void {
     // Initialize allocator for memory management
     var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
     const allocator = gpa.allocator();
+    defer _ = gpa.deinit();
 
     // Initialize stdin and stdout
     const stdout_file = std.io.getStdOut().writer();
@@ -46,7 +50,26 @@ pub fn main() !void {
 
     // Read file
     const fileContents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-    try stdout.print("{s}", .{fileContents});
+    defer allocator.free(fileContents);
+
+    // Create Lexer
+    var fileLexer = lexer.Lexer{ .source = fileContents };
+
+    // Print all generated Tokens
+    var token: lexer.token.Token = undefined;
+    while (!fileLexer.isAtEnd()) {
+        token = try fileLexer.getToken();
+        try stdout.print(
+            "Token of type {any} with content \"{s}\" from char {d} to char {d}\n",
+            .{ token.type, token.lexeme, token.start, token.end },
+        );
+        try bw.flush();
+    }
 
     try bw.flush();
+}
+
+// This test collects all the tests from imports
+test {
+    std.testing.refAllDecls(@This());
 }
