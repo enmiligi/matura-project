@@ -132,7 +132,6 @@ test "lexer returns correct tokens" {
         .{ .start = 0, .end = 3, .lexeme = "let", .type = .Let },
         .{ .start = 4, .end = 10, .lexeme = "letter", .type = .Identifier },
         .{ .start = 11, .end = 12, .lexeme = "=", .type = .Equal },
-
         .{ .start = 13, .end = 14, .lexeme = "5", .type = .IntLiteral },
         .{ .start = 15, .end = 17, .lexeme = "in", .type = .In },
         .{ .start = 18, .end = 19, .lexeme = "(", .type = .LeftParen },
