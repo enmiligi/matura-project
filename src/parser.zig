@@ -97,6 +97,51 @@ pub const Parser = struct {
         return expr;
     }
 
+    // let ::= Let Identifier Equal expr In expr
+    fn let(self: *Parser) !*AST {
+        _ = try self.getToken();
+
+        const name = try self.expectToken(.Identifier);
+
+        _ = try self.expectToken(.Equal);
+
+        const be = try self.expression(0);
+        errdefer be.deinit(self.allocator);
+
+        _ = try self.expectToken(.In);
+
+        const in = try self.expression(0);
+        errdefer in.deinit(self.allocator);
+
+        const letExpr = try self.allocator.create(AST);
+        letExpr.* = .{ .let = .{
+            .name = name,
+            .be = be,
+            .in = in,
+        } };
+        return letExpr;
+    }
+
+    // lambda ::= Lambda Identifier Dot Expr
+    fn lambda(self: *Parser) !*AST {
+        _ = try self.getToken();
+
+        const argname = try self.expectToken(.Identifier);
+
+        _ = try self.expectToken(.Dot);
+
+        const expr = try self.expression(0);
+        errdefer expr.deinit(self.allocator);
+
+        const lambdaExpr = try self.allocator.create(AST);
+        lambdaExpr.* = .{ .lambda = .{
+            .argname = argname,
+            .expr = expr,
+        } };
+
+        return lambdaExpr;
+    }
+
     // Get rule in prefix position
     fn getNud(self: *Parser) ?PrefixParseFn {
         return switch (self.peekToken().type) {
@@ -104,6 +149,8 @@ pub const Parser = struct {
             token.TokenType.FloatLiteral => floatLiteral,
             token.TokenType.LeftParen => brackets,
             token.TokenType.Identifier => identifier,
+            token.TokenType.Let => let,
+            token.TokenType.Lambda => lambda,
             else => null,
         };
     }
@@ -157,6 +204,90 @@ pub const Parser = struct {
         return self.next;
     }
 };
+
+test "parser parses lets" {
+    const allocator = std.testing.allocator;
+    const code = "let x = 5 in x\n\t";
+    var p = try Parser.init(allocator, code);
+    defer p.deinit();
+    const ast = try p.parse();
+    defer ast.deinit(allocator);
+
+    var let: *AST = undefined;
+    var be: *AST = undefined;
+    var in: *AST = undefined;
+    {
+        let = try allocator.create(AST);
+        errdefer let.deinit(allocator);
+        be = try allocator.create(AST);
+        errdefer be.deinit(allocator);
+        in = try allocator.create(AST);
+    }
+
+    be.* = .{
+        .intConstant = .{
+            .value = 5,
+            .token = .{
+                .start = 8,
+                .end = 9,
+                .lexeme = "5",
+                .type = .IntLiteral,
+            },
+        },
+    };
+    in.* = .{ .identifier = .{ .token = .{
+        .start = 13,
+        .end = 14,
+        .lexeme = "x",
+        .type = .Identifier,
+    } } };
+    let.* = .{ .let = .{
+        .name = .{
+            .start = 4,
+            .end = 5,
+            .lexeme = "x",
+            .type = .Identifier,
+        },
+        .in = in,
+        .be = be,
+    } };
+    defer let.deinit(allocator);
+
+    try std.testing.expectEqualDeep(let, ast);
+}
+
+test "parser parses lambdas" {
+    const allocator = std.testing.allocator;
+    const code = "lambda x. x\n";
+    var p = try Parser.init(allocator, code);
+    defer p.deinit();
+    const ast = try p.parse();
+    defer ast.deinit(allocator);
+
+    var x: *AST = undefined;
+    var lambda: *AST = undefined;
+    {
+        x = try allocator.create(AST);
+        errdefer x.deinit(allocator);
+        lambda = try allocator.create(AST);
+    }
+    x.* = .{ .identifier = .{ .token = .{
+        .start = 10,
+        .end = 11,
+        .lexeme = "x",
+        .type = .Identifier,
+    } } };
+
+    lambda.* = .{ .lambda = .{ .argname = .{
+        .start = 7,
+        .end = 8,
+        .lexeme = "x",
+        .type = .Identifier,
+    }, .expr = x } };
+    defer lambda.deinit(allocator);
+
+    try std.testing.expectEqualDeep(lambda, ast);
+}
 
 test "parser parses numbers and calls correctly" {
     const allocator = std.testing.allocator;

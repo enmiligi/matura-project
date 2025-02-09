@@ -51,7 +51,7 @@ pub const AST = union(enum) {
     pub fn debugPrint(self: AST) void {
         switch (self) {
             .let => |let| {
-                std.debug.print("Let(name: {s}, to: ", .{let.name.lexeme});
+                std.debug.print("Let(name: {s}, be: ", .{let.name.lexeme});
                 let.be.debugPrint();
                 std.debug.print(", in: ", .{});
                 let.in.debugPrint();

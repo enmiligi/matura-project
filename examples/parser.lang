@@ -1,1 +1,1 @@
-e1 (e2 5.5 7.7)
+let e1 = lambda x. x 5 in (e2 (e1 7.7))
