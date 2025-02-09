@@ -2,6 +2,8 @@ const std = @import("std");
 // This needs to be public for the test
 // at the end of this file to work.
 pub const lexer = @import("./lexer.zig");
+pub const ast = @import("./ast.zig");
+pub const parser = @import("./parser.zig");
 
 const MainError = error{
     WrongUsage,
@@ -53,18 +55,17 @@ pub fn main() !void {
     defer allocator.free(fileContents);
 
     // Create Lexer
-    var fileLexer = lexer.Lexer{ .source = fileContents };
+    var fileParser = try parser.Parser.init(allocator, fileContents);
+    defer fileParser.deinit();
 
-    // Print all generated Tokens
-    var token: lexer.token.Token = undefined;
-    while (!fileLexer.isAtEnd()) {
-        token = try fileLexer.getToken();
-        try stdout.print(
-            "Token of type {any} with content \"{s}\" from char {d} to char {d}\n",
-            .{ token.type, token.lexeme, token.start, token.end },
-        );
-        try bw.flush();
-    }
+    // Parse an expression
+    const fileAst = try fileParser.parse();
+    defer fileAst.deinit(allocator);
+
+    // Print the AST
+    fileAst.debugPrint();
+
+    _ = stdout;
 
     try bw.flush();
 }

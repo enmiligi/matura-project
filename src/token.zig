@@ -14,6 +14,8 @@ pub const TokenType = enum {
     IntLiteral,
     // user-defined
     Identifier,
+    // End of File
+    EOF,
 };
 
 // lexeme = source[start..end]

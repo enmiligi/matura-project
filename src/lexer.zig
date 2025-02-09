@@ -16,7 +16,7 @@ pub const Lexer = struct {
     tokenStart: usize = 0,
     location: usize = 0,
 
-    pub fn isAtEnd(self: *Lexer) bool {
+    fn isAtEnd(self: *Lexer) bool {
         return self.location == self.source.len;
     }
 
@@ -24,8 +24,7 @@ pub const Lexer = struct {
     pub fn getToken(self: *Lexer) !token.Token {
         self.skipWhitespace();
         self.tokenStart = self.location;
-        if (self.isAtEnd()) return error.EndOfFile;
-        self.tokenStart = self.location;
+        if (self.isAtEnd()) return self.makeToken(.EOF);
         const c = self.getChar();
         // Possible Tokens:
         // identifier and keywords: start with alphanumeric
@@ -57,9 +56,12 @@ pub const Lexer = struct {
         var tokens = std.ArrayList(token.Token).init(allocator);
         errdefer tokens.deinit();
 
-        while (!self.isAtEnd()) {
-            try tokens.append(try self.getToken());
+        var t = try self.getToken();
+        while (!(t.type == .EOF)) {
+            try tokens.append(t);
+            t = try self.getToken();
         }
+        try tokens.append(t);
 
         return tokens;
     }
@@ -72,14 +74,13 @@ pub const Lexer = struct {
             .end = self.location,
             .lexeme = self.getTokenString(),
         };
-        self.skipWhitespace();
         self.tokenStart = self.location;
         return t;
     }
 
     // identifier ::= alpha alnum*
     fn identifier(self: *Lexer) token.Token {
-        while (std.ascii.isAlphabetic(self.getChar())) {
+        while (std.ascii.isAlphanumeric(self.getChar())) {
             self.location += 1;
         }
         const tt = identifierMap.get(self.getTokenString()) orelse .Identifier;
@@ -128,7 +129,7 @@ fn getTokensForCode(code: []const u8, allocator: std.mem.Allocator) !std.ArrayLi
 
 test "lexer returns correct tokens" {
     const allocator = std.testing.allocator;
-    const expectedTokens: [11]token.Token = .{
+    const expectedTokens: [12]token.Token = .{
         .{ .start = 0, .end = 3, .lexeme = "let", .type = .Let },
         .{ .start = 4, .end = 10, .lexeme = "letter", .type = .Identifier },
         .{ .start = 11, .end = 12, .lexeme = "=", .type = .Equal },
@@ -140,6 +141,7 @@ test "lexer returns correct tokens" {
         .{ .start = 27, .end = 28, .lexeme = ".", .type = .Dot },
         .{ .start = 29, .end = 33, .lexeme = "7.65", .type = .FloatLiteral },
         .{ .start = 33, .end = 34, .lexeme = ")", .type = .RightParen },
+        .{ .start = 35, .end = 35, .lexeme = "", .type = .EOF },
     };
     const code = "let letter = 5 in (lambda x. 7.65)\n";
     var tokens = try getTokensForCode(code, allocator);
