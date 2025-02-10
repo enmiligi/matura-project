@@ -43,12 +43,16 @@ pub const Parser = struct {
 
     // main loop as defined by Vaughan R. Pratt in
     // "Top Down Operator Precedence"
+    // rbp is right binding power
     fn expression(self: *Parser, rbp: Precedence) !*AST {
+        // nud stands for null denotation
         const nud = self.getNud();
         const n = nud orelse return error.InvalidPrefix;
         var left = try n(self);
         errdefer left.deinit(self.allocator);
+        // led stands for left denotation
         var led = self.getLed();
+        // lbp is left binding power
         var c, var lbp = led orelse return left;
         while (rbp < lbp) {
             left = try c(self, left);
@@ -192,7 +196,7 @@ pub const Parser = struct {
     fn getToken(self: *Parser) !token.Token {
         const current = self.next;
         // Don't always get next token, since it might be the end
-        if (!(current.type == .EOF)) {
+        if (current.type != .EOF) {
             self.next = try self.lexer.getToken();
         } else {
             self.atEnd = true;

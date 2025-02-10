@@ -54,7 +54,7 @@ pub fn main() !void {
     const fileContents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(fileContents);
 
-    // Create Lexer
+    // Create Parser
     var fileParser = try parser.Parser.init(allocator, fileContents);
     defer fileParser.deinit();
 
