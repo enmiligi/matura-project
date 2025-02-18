@@ -105,8 +105,8 @@ fn deinitTypeEnv(env: *TypeEnv, allocator: std.mem.Allocator) void {
     var iterator = env.iterator();
     while (iterator.next()) |entry| {
         deinitScheme(entry.value_ptr.*, allocator);
+        env.removeByPtr(entry.key_ptr);
     }
-    env.deinit();
 }
 
 pub const InferenceError = error{
@@ -127,7 +127,7 @@ pub const AlgorithmJ = struct {
 
     pub fn getType(self: *AlgorithmJ, expr: *AST) !*Type {
         var typeEnv = TypeEnv.init(self.allocator);
-        defer deinitTypeEnv(&typeEnv, self.allocator);
+        defer typeEnv.deinit();
         return self.run(&typeEnv, expr);
     }
 
@@ -290,6 +290,7 @@ pub const AlgorithmJ = struct {
     }
 
     fn run(self: *AlgorithmJ, typeEnv: *TypeEnv, ast: *AST) !*Type {
+        errdefer deinitTypeEnv(typeEnv, self.allocator);
         const t = try Type.init(self.allocator);
         switch (ast.*) {
             .identifier => |id| {
