@@ -4,6 +4,7 @@ const std = @import("std");
 pub const lexer = @import("./lexer.zig");
 pub const ast = @import("./ast.zig");
 pub const parser = @import("./parser.zig");
+pub const type_inference = @import("./type_inference.zig");
 
 const MainError = error{
     WrongUsage,
@@ -62,10 +63,14 @@ pub fn main() !void {
     const fileAst = try fileParser.parse();
     defer fileAst.deinit(allocator);
 
+    var algorithmJ = type_inference.AlgorithmJ.init(allocator);
+    defer algorithmJ.deinit();
+
     // Print the AST
     fileAst.debugPrint();
 
-    _ = stdout;
+    const t = algorithmJ.getType(fileAst);
+    try stdout.print("{any}", .{t});
 
     try bw.flush();
 }
