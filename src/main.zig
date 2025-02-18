@@ -64,15 +64,17 @@ pub fn main() !void {
     defer fileAst.deinit(allocator);
 
     var algorithmJ = type_inference.AlgorithmJ.init(allocator);
-    defer algorithmJ.deinit();
 
     // Print the AST
     fileAst.debugPrint();
 
-    const t = algorithmJ.getType(fileAst);
-    try stdout.print("{any}", .{t});
-
+    try stdout.print("\n", .{});
     try bw.flush();
+
+    const t = try algorithmJ.getType(fileAst);
+    defer t.deinit(allocator);
+
+    type_inference.debugPrintType(t);
 }
 
 // This test collects all the tests from imports

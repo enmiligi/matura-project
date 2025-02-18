@@ -1,1 +1,4 @@
-let x = lambda y. y in x
+let const = lambda x. lambda y. x in
+let always5 = const 5 in
+let always2point5 = const 2.5 in
+const

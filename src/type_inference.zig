@@ -3,16 +3,76 @@ const AST = @import("./ast.zig").AST;
 
 const PrimitiveType = enum { Int, Float };
 
-pub const TypeVar = usize;
-
-pub const Type = union(enum) {
-    typeVar: TypeVar,
-    primitive: PrimitiveType,
-    function: struct {
-        from: *Type,
-        to: *Type,
-    },
+pub const TypeVar = struct {
+    n: usize,
+    subst: ?*Type,
 };
+
+pub const Type = struct {
+    data: union(enum) {
+        typeVar: TypeVar,
+        primitive: PrimitiveType,
+        function: struct {
+            from: *Type,
+            to: *Type,
+        },
+    },
+    rc: usize,
+
+    pub fn init(allocator: std.mem.Allocator) !*Type {
+        const t = try allocator.create(Type);
+        t.*.rc = 1;
+        return t;
+    }
+
+    pub fn deinit(self: *Type, allocator: std.mem.Allocator) void {
+        self.rc -= 1;
+        if (self.rc == 0) {
+            switch (self.data) {
+                .typeVar => |typeVar| {
+                    if (typeVar.subst) |subst| {
+                        subst.deinit(allocator);
+                    }
+                },
+                .primitive => {},
+                .function => |function| {
+                    function.from.deinit(allocator);
+                    function.to.deinit(allocator);
+                },
+            }
+            allocator.destroy(self);
+        }
+    }
+};
+
+pub fn debugPrintType(t: *Type) void {
+    switch (t.data) {
+        .typeVar => |typeVar| {
+            if (typeVar.subst) |substitution| {
+                debugPrintType(substitution);
+            } else {
+                std.debug.print("TypeVar({d}, rc: {d})", .{ typeVar.n, t.rc });
+            }
+        },
+        .primitive => |primitive| {
+            switch (primitive) {
+                .Int => {
+                    std.debug.print("Int(rc: {d})", .{t.rc});
+                },
+                .Float => {
+                    std.debug.print("Float(rc: {d})", .{t.rc});
+                },
+            }
+        },
+        .function => |function| {
+            std.debug.print("(", .{});
+            debugPrintType(function.from);
+            std.debug.print(" -> ", .{});
+            debugPrintType(function.to);
+            std.debug.print(", rc: {d})", .{t.rc});
+        },
+    }
+}
 
 pub const TypeScheme = union(enum) {
     type: Type,
@@ -22,9 +82,15 @@ pub const TypeScheme = union(enum) {
     },
 };
 
-const Substitution = std.AutoHashMap(TypeVar, *Type);
-
 const TypeEnv = std.StringHashMap(*Type);
+
+fn deinitTypeEnv(env: *TypeEnv, allocator: std.mem.Allocator) void {
+    var iterator = env.iterator();
+    while (iterator.next()) |entry| {
+        entry.value_ptr.*.deinit(allocator);
+    }
+    env.deinit();
+}
 
 pub const InferenceError = error{
     CouldNotUnify,
@@ -33,72 +99,41 @@ pub const InferenceError = error{
 };
 
 pub const AlgorithmJ = struct {
-    substE: Substitution,
-    currentTypeVar: TypeVar = 0,
+    currentTypeVar: usize = 0,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) AlgorithmJ {
         return .{
-            .substE = Substitution.init(allocator),
             .allocator = allocator,
         };
     }
 
-    pub fn deinit(self: *AlgorithmJ) void {
-        self.substE.deinit();
-    }
-
     pub fn getType(self: *AlgorithmJ, expr: *AST) !*Type {
         var typeEnv = TypeEnv.init(self.allocator);
-        defer typeEnv.deinit();
-        return self.substitute(try self.run(&typeEnv, expr));
+        defer deinitTypeEnv(&typeEnv, self.allocator);
+        return self.run(&typeEnv, expr);
     }
 
     fn newVar(self: *AlgorithmJ) TypeVar {
         self.currentTypeVar += 1;
-        return self.currentTypeVar;
+        return .{
+            .n = self.currentTypeVar,
+            .subst = null,
+        };
     }
 
-    fn substituteTypeVar(typeA: *Type, typeVarA: TypeVar, typeB: *Type) *Type {
-        switch (typeA.*) {
-            .typeVar => |typeVar| {
-                if (typeVar == typeVarA) {
-                    return typeB;
-                } else {
-                    return typeA;
-                }
-            },
-            .primitive => |_| {
-                return typeA;
-            },
-            .function => |*function| {
-                function.from = substituteTypeVar(function.from, typeVarA, typeB);
-                function.to = substituteTypeVar(function.to, typeVarA, typeB);
-                return typeA;
-            },
-        }
+    fn newVarT(self: *AlgorithmJ) Type {
+        return .{ .data = .{ .typeVar = self.newVar() }, .rc = 1 };
     }
 
-    fn substitute(self: *AlgorithmJ, typeA: *Type) *Type {
-        switch (typeA.*) {
-            .typeVar => |typeVarA| {
-                return self.substE.get(typeVarA) orelse typeA;
-            },
-            .function => |*functionA| {
-                functionA.from = self.substitute(functionA.from);
-                functionA.to = self.substitute(functionA.to);
-                return typeA;
-            },
-            else => {
-                return typeA;
-            },
-        }
-    }
-
-    fn contains(typeVarA: TypeVar, typeB: *Type) bool {
-        switch (typeB.*) {
+    fn contains(typeVarA: *TypeVar, typeB: *Type) bool {
+        switch (typeB.data) {
             .typeVar => |typeVarB| {
-                return typeVarA == typeVarB;
+                if (typeVarB.subst) |substB| {
+                    return contains(typeVarA, substB);
+                } else {
+                    return typeVarA.*.n == typeVarB.n;
+                }
             },
             .function => |functionB| {
                 return contains(typeVarA, functionB.from) or contains(typeVarA, functionB.to);
@@ -109,49 +144,38 @@ pub const AlgorithmJ = struct {
         }
     }
 
-    fn addSubstitution(self: *AlgorithmJ, typeVarA: TypeVar, typeB: *Type) !void {
-        switch (typeB.*) {
-            .typeVar => |typeVarB| {
-                if (typeVarA != typeVarB) {
-                    try self.substE.put(typeVarA, typeB);
-                } else {
-                    return;
-                }
-            },
-            .primitive => |_| {
-                try self.substE.put(typeVarA, typeB);
-            },
-            .function => |_| {
-                if (contains(typeVarA, typeB)) {
-                    return error.InfiniteType;
-                } else {
-                    try self.substE.put(typeVarA, typeB);
-                }
-            },
+    fn addSubstitution(typeVarA: *TypeVar, typeB: *Type) !void {
+        if (contains(typeVarA, typeB)) {
+            return error.InfiniteType;
         }
-        var iterator = self.substE.iterator();
-        while (iterator.next()) |entry| {
-            const substituted = substituteTypeVar(entry.value_ptr.*, typeVarA, typeB);
-            entry.value_ptr.* = substituted;
-        }
+        typeB.rc += 1;
+        typeVarA.subst = typeB;
     }
 
     fn unify(self: *AlgorithmJ, typeA: *Type, typeB: *Type) !void {
-        switch (typeA.*) {
-            .typeVar => |typeVarA| {
-                if (self.substE.get(typeVarA)) |substitutedA| {
+        switch (typeA.data) {
+            .typeVar => |*typeVarA| {
+                if (typeVarA.subst) |substitutedA| {
                     try self.unify(substitutedA, typeB);
                 } else {
-                    try self.addSubstitution(typeVarA, typeB);
+                    switch (typeB.data) {
+                        .typeVar => |_| {
+                            if (typeA == typeB) {
+                                return;
+                            }
+                        },
+                        else => {},
+                    }
+                    try addSubstitution(typeVarA, typeB);
                 }
             },
             .primitive => |primitiveA| {
-                switch (typeB.*) {
-                    .typeVar => |typeVarB| {
-                        if (self.substE.get(typeVarB)) |substitutedB| {
+                switch (typeB.data) {
+                    .typeVar => |*typeVarB| {
+                        if (typeVarB.subst) |substitutedB| {
                             try self.unify(typeA, substitutedB);
                         } else {
-                            try self.addSubstitution(typeVarB, typeA);
+                            try addSubstitution(typeVarB, typeA);
                         }
                     },
                     .primitive => |primitiveB| {
@@ -165,7 +189,7 @@ pub const AlgorithmJ = struct {
                 }
             },
             .function => |functionA| {
-                switch (typeB.*) {
+                switch (typeB.data) {
                     .primitive => |_| {
                         return error.CouldNotUnify;
                     },
@@ -173,11 +197,11 @@ pub const AlgorithmJ = struct {
                         try self.unify(functionA.from, functionB.from);
                         try self.unify(functionA.to, functionB.to);
                     },
-                    .typeVar => |typeVarB| {
-                        if (self.substE.get(typeVarB)) |substitutedB| {
+                    .typeVar => |*typeVarB| {
+                        if (typeVarB.subst) |substitutedB| {
                             try self.unify(typeA, substitutedB);
                         } else {
-                            try self.addSubstitution(typeVarB, typeA);
+                            try addSubstitution(typeVarB, typeA);
                         }
                     },
                 }
@@ -186,53 +210,71 @@ pub const AlgorithmJ = struct {
     }
 
     fn run(self: *AlgorithmJ, typeEnv: *TypeEnv, ast: *AST) !*Type {
-        const t = try self.allocator.create(Type);
+        const t = try Type.init(self.allocator);
         switch (ast.*) {
             .identifier => |id| {
-                defer self.allocator.destroy(t);
-                return typeEnv.get(id.token.lexeme) orelse error.UnknownIdentifier;
+                self.allocator.destroy(t);
+                if (typeEnv.get(id.token.lexeme)) |typeOfId| {
+                    typeOfId.rc += 1;
+                    return typeOfId;
+                } else {
+                    return error.UnknownIdentifier;
+                }
             },
             .intConstant => |_| {
-                t.* = .{ .primitive = .Int };
+                t.data = .{ .primitive = .Int };
             },
             .floatConstant => |_| {
-                t.* = .{ .primitive = .Float };
+                t.data = .{ .primitive = .Float };
             },
             .call => |call| {
+                t.* = self.newVarT();
+                errdefer t.deinit(self.allocator);
                 const t1 = try self.run(typeEnv, call.function);
+                defer t1.deinit(self.allocator);
                 const t2 = try self.run(typeEnv, call.arg);
-                t.* = .{ .typeVar = self.newVar() };
-                const fType = try self.allocator.create(Type);
-                errdefer self.allocator.destroy(fType);
-                fType.* = .{ .function = .{
+                defer t2.deinit(self.allocator);
+                const fType = try Type.init(self.allocator);
+                defer self.allocator.destroy(fType);
+                fType.data = .{ .function = .{
                     .from = t2,
                     .to = t,
                 } };
                 try self.unify(t1, fType);
             },
             .lambda => |lambda| {
-                const newTypeVar = try self.allocator.create(Type);
-                newTypeVar.* = .{ .typeVar = self.newVar() };
-                errdefer self.allocator.destroy(newTypeVar);
+                errdefer self.allocator.destroy(t);
+                const newTypeVar = try Type.init(self.allocator);
+                newTypeVar.* = self.newVarT();
+                errdefer newTypeVar.deinit(self.allocator);
                 const previous = typeEnv.get(lambda.argname.lexeme);
                 try typeEnv.put(lambda.argname.lexeme, newTypeVar);
                 const returnType = try self.run(typeEnv, lambda.expr);
+                errdefer returnType.deinit(self.allocator);
                 if (previous) |previousType| {
                     try typeEnv.put(lambda.argname.lexeme, previousType);
                 } else {
                     _ = typeEnv.remove(lambda.argname.lexeme);
                 }
-                t.* = .{ .function = .{
+                t.data = .{ .function = .{
                     .from = newTypeVar,
                     .to = returnType,
                 } };
             },
             .let => |let| {
-                defer self.allocator.destroy(t);
+                self.allocator.destroy(t);
                 const typeOfVar = try self.run(typeEnv, let.be);
                 const previous = typeEnv.get(let.name.lexeme);
-                try typeEnv.put(let.name.lexeme, typeOfVar);
-                const typeOfExpr = self.run(typeEnv, let.in);
+                {
+                    errdefer typeOfVar.deinit(self.allocator);
+                    try typeEnv.put(let.name.lexeme, typeOfVar);
+                }
+                if (previous) |pT| {
+                    errdefer pT.deinit(self.allocator);
+                }
+                const typeOfExpr = try self.run(typeEnv, let.in);
+                defer typeOfVar.deinit(self.allocator);
+                errdefer typeOfExpr.deinit(self.allocator);
                 if (previous) |previousType| {
                     try typeEnv.put(let.name.lexeme, previousType);
                 } else {
