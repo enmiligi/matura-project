@@ -74,20 +74,37 @@ pub fn debugPrintType(t: *Type) void {
     }
 }
 
-pub const TypeScheme = union(enum) {
-    type: Type,
-    forall: struct {
-        typeVar: TypeVar,
-        scheme: *TypeScheme,
-    },
+const TypeVarSet = std.AutoHashMap(usize, void);
+
+pub const Forall = struct {
+    typeVars: TypeVarSet,
+    type: *Type,
 };
 
-const TypeEnv = std.StringHashMap(*Type);
+pub const TypeScheme = union(enum) {
+    type: *Type,
+    forall: Forall,
+};
+
+pub fn deinitScheme(scheme: *TypeScheme, allocator: std.mem.Allocator) void {
+    switch (scheme.*) {
+        .type => |t| {
+            t.deinit(allocator);
+        },
+        .forall => |*forall| {
+            forall.typeVars.deinit();
+            forall.type.deinit(allocator);
+        },
+    }
+    allocator.destroy(scheme);
+}
+
+const TypeEnv = std.StringHashMap(*TypeScheme);
 
 fn deinitTypeEnv(env: *TypeEnv, allocator: std.mem.Allocator) void {
     var iterator = env.iterator();
     while (iterator.next()) |entry| {
-        entry.value_ptr.*.deinit(allocator);
+        deinitScheme(entry.value_ptr.*, allocator);
     }
     env.deinit();
 }
@@ -209,14 +226,84 @@ pub const AlgorithmJ = struct {
         }
     }
 
+    fn copyAndReplace(self: *AlgorithmJ, inputType: *Type, replacementMap: *const std.AutoHashMap(usize, *Type)) !*Type {
+        switch (inputType.data) {
+            .typeVar => |typeVar| {
+                if (typeVar.subst) |subst| {
+                    return self.copyAndReplace(subst, replacementMap);
+                } else {
+                    if (replacementMap.get(typeVar.n)) |newTypeVar| {
+                        newTypeVar.rc += 1;
+                        return newTypeVar;
+                    } else {
+                        inputType.rc += 1;
+                        return inputType;
+                    }
+                }
+            },
+            .primitive => |primitive| {
+                const t = try Type.init(self.allocator);
+                t.data = .{ .primitive = primitive };
+                return t;
+            },
+            .function => |function| {
+                const t = try Type.init(self.allocator);
+                errdefer self.allocator.destroy(t);
+                const fromCopied = try self.copyAndReplace(function.from, replacementMap);
+                errdefer fromCopied.deinit(self.allocator);
+                t.data = .{ .function = .{
+                    .from = fromCopied,
+                    .to = try self.copyAndReplace(function.to, replacementMap),
+                } };
+                return t;
+            },
+        }
+    }
+
+    fn instantiate(self: *AlgorithmJ, forall: *Forall) !*Type {
+        var instantiatedVars = std.AutoHashMap(usize, *Type).init(self.allocator);
+        defer instantiatedVars.deinit();
+
+        var iterator = forall.typeVars.iterator();
+        {
+            errdefer {
+                var instIterator = instantiatedVars.iterator();
+                while (instIterator.next()) |entry| {
+                    self.allocator.destroy(entry.value_ptr.*);
+                }
+            }
+            while (iterator.next()) |entry| {
+                const t = try self.allocator.create(Type);
+                errdefer self.allocator.destroy(t);
+                t.* = self.newVarT();
+                try instantiatedVars.put(entry.key_ptr.*, t);
+            }
+        }
+        defer {
+            var instIterator = instantiatedVars.iterator();
+            while (instIterator.next()) |entry| {
+                entry.value_ptr.*.deinit(self.allocator);
+            }
+            instantiatedVars.deinit();
+        }
+        return try self.copyAndReplace(forall.type, &instantiatedVars);
+    }
+
     fn run(self: *AlgorithmJ, typeEnv: *TypeEnv, ast: *AST) !*Type {
         const t = try Type.init(self.allocator);
         switch (ast.*) {
             .identifier => |id| {
                 self.allocator.destroy(t);
-                if (typeEnv.get(id.token.lexeme)) |typeOfId| {
-                    typeOfId.rc += 1;
-                    return typeOfId;
+                if (typeEnv.get(id.token.lexeme)) |typeOfIdScheme| {
+                    switch (typeOfIdScheme.*) {
+                        .type => |typeOfId| {
+                            typeOfId.rc += 1;
+                            return typeOfId;
+                        },
+                        .forall => |*forall| {
+                            return self.instantiate(forall);
+                        },
+                    }
                 } else {
                     return error.UnknownIdentifier;
                 }
@@ -246,16 +333,29 @@ pub const AlgorithmJ = struct {
                 errdefer self.allocator.destroy(t);
                 const newTypeVar = try Type.init(self.allocator);
                 newTypeVar.* = self.newVarT();
-                errdefer newTypeVar.deinit(self.allocator);
+                var typeScheme: *TypeScheme = undefined;
+                {
+                    errdefer newTypeVar.deinit(self.allocator);
+                    typeScheme = try self.allocator.create(TypeScheme);
+                }
+                typeScheme.* = .{ .type = newTypeVar };
+                var returnType: *Type = undefined;
                 const previous = typeEnv.get(lambda.argname.lexeme);
-                try typeEnv.put(lambda.argname.lexeme, newTypeVar);
-                const returnType = try self.run(typeEnv, lambda.expr);
+                if (previous) |pT| {
+                    errdefer deinitScheme(pT, self.allocator);
+                }
+                {
+                    errdefer newTypeVar.deinit(self.allocator);
+                    try typeEnv.put(lambda.argname.lexeme, typeScheme);
+                }
+                returnType = try self.run(typeEnv, lambda.expr);
                 errdefer returnType.deinit(self.allocator);
                 if (previous) |previousType| {
                     try typeEnv.put(lambda.argname.lexeme, previousType);
                 } else {
                     _ = typeEnv.remove(lambda.argname.lexeme);
                 }
+                self.allocator.destroy(typeScheme);
                 t.data = .{ .function = .{
                     .from = newTypeVar,
                     .to = returnType,
@@ -265,21 +365,27 @@ pub const AlgorithmJ = struct {
                 self.allocator.destroy(t);
                 const typeOfVar = try self.run(typeEnv, let.be);
                 const previous = typeEnv.get(let.name.lexeme);
+                var typeScheme: *TypeScheme = undefined;
                 {
                     errdefer typeOfVar.deinit(self.allocator);
-                    try typeEnv.put(let.name.lexeme, typeOfVar);
+                    typeScheme = try self.allocator.create(TypeScheme);
+                }
+                typeScheme.* = .{ .type = typeOfVar };
+                {
+                    errdefer typeOfVar.deinit(self.allocator);
+                    try typeEnv.put(let.name.lexeme, typeScheme);
                 }
                 if (previous) |pT| {
                     errdefer pT.deinit(self.allocator);
                 }
                 const typeOfExpr = try self.run(typeEnv, let.in);
-                defer typeOfVar.deinit(self.allocator);
                 errdefer typeOfExpr.deinit(self.allocator);
                 if (previous) |previousType| {
                     try typeEnv.put(let.name.lexeme, previousType);
                 } else {
                     _ = typeEnv.remove(let.name.lexeme);
                 }
+                deinitScheme(typeScheme, self.allocator);
                 return typeOfExpr;
             },
         }
