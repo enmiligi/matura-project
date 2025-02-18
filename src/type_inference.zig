@@ -339,16 +339,16 @@ pub const AlgorithmJ = struct {
                     typeScheme = try self.allocator.create(TypeScheme);
                 }
                 typeScheme.* = .{ .type = newTypeVar };
-                var returnType: *Type = undefined;
                 const previous = typeEnv.get(lambda.argname.lexeme);
                 if (previous) |pT| {
                     errdefer deinitScheme(pT, self.allocator);
                 }
                 {
+                    errdefer self.allocator.destroy(typeScheme);
                     errdefer newTypeVar.deinit(self.allocator);
                     try typeEnv.put(lambda.argname.lexeme, typeScheme);
                 }
-                returnType = try self.run(typeEnv, lambda.expr);
+                const returnType = try self.run(typeEnv, lambda.expr);
                 errdefer returnType.deinit(self.allocator);
                 if (previous) |previousType| {
                     try typeEnv.put(lambda.argname.lexeme, previousType);
@@ -369,10 +369,8 @@ pub const AlgorithmJ = struct {
                 {
                     errdefer typeOfVar.deinit(self.allocator);
                     typeScheme = try self.allocator.create(TypeScheme);
-                }
-                typeScheme.* = .{ .type = typeOfVar };
-                {
-                    errdefer typeOfVar.deinit(self.allocator);
+                    typeScheme.* = .{ .type = typeOfVar };
+                    errdefer self.allocator.destroy(typeScheme);
                     try typeEnv.put(let.name.lexeme, typeScheme);
                 }
                 if (previous) |pT| {
