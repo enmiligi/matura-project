@@ -3,12 +3,16 @@ const AST = @import("./ast.zig").AST;
 
 const PrimitiveType = enum { Int, Float };
 
+// TypeVars are identified by their number
+// The depth assigned is used to efficiently check if you can generalise
+// Substitutions are stored in the TypeVar instead of a global Substitution map.
 pub const TypeVar = struct {
     n: usize,
     depth: usize,
     subst: ?*Type,
 };
 
+// This is the type used for non-generalised/instatiated types
 pub const Type = struct {
     data: union(enum) {
         typeVar: TypeVar,
@@ -77,16 +81,19 @@ pub fn debugPrintType(t: *Type) void {
 
 const TypeVarSet = std.AutoHashMap(usize, void);
 
+// The type for generalised types
 pub const Forall = struct {
     typeVars: TypeVarSet,
     type: *Type,
 };
 
+// The type of optionally generalised types
 pub const TypeScheme = union(enum) {
     type: *Type,
     forall: Forall,
 };
 
+// Deinitialize TypeScheme
 pub fn deinitScheme(scheme: *TypeScheme, allocator: std.mem.Allocator) void {
     switch (scheme.*) {
         .type => |t| {
@@ -102,6 +109,7 @@ pub fn deinitScheme(scheme: *TypeScheme, allocator: std.mem.Allocator) void {
 
 const TypeEnv = std.StringHashMap(*TypeScheme);
 
+// Deinitialize stored types in typeEnv
 fn deinitTypeEnv(env: *TypeEnv, allocator: std.mem.Allocator) void {
     var iterator = env.iterator();
     while (iterator.next()) |entry| {
@@ -116,6 +124,8 @@ pub const InferenceError = error{
     UnknownIdentifier,
 };
 
+// The struct containing all global data used for Algorithm J
+// except the substitutions
 pub const AlgorithmJ = struct {
     currentTypeVar: usize = 0,
     allocator: std.mem.Allocator,
@@ -146,6 +156,9 @@ pub const AlgorithmJ = struct {
         return .{ .data = .{ .typeVar = self.newVar() }, .rc = 1 };
     }
 
+    // This function is used for checking if there is an infinite type
+    // and also adjust the depth since typeVarA will be substituted with
+    // something containing typeB if not to not have two traversals
     fn containsAndShiftDepth(typeVarA: *TypeVar, typeB: *Type) bool {
         switch (typeB.data) {
             .typeVar => |*typeVarB| {
@@ -176,9 +189,12 @@ pub const AlgorithmJ = struct {
         typeVarA.subst = typeB;
     }
 
+    // Unify typeA and typeB creating substitutions as needed
     fn unify(self: *AlgorithmJ, typeA: *Type, typeB: *Type) !void {
         switch (typeA.data) {
             .typeVar => |*typeVarA| {
+                // If A is a typeVar, unify its substitution if present
+                // else add a Substitution unless 'a' should be replaced with 'a'
                 if (typeVarA.subst) |substitutedA| {
                     try self.unify(substitutedA, typeB);
                 } else {
@@ -233,6 +249,7 @@ pub const AlgorithmJ = struct {
         }
     }
 
+    // Recursively copy the Type while replacing type variables
     fn copyAndReplace(self: *AlgorithmJ, inputType: *Type, replacementMap: *const std.AutoHashMap(usize, *Type)) !*Type {
         switch (inputType.data) {
             .typeVar => |typeVar| {
@@ -274,6 +291,7 @@ pub const AlgorithmJ = struct {
         }
     }
 
+    // Create a replacement map and apply it
     fn instantiate(self: *AlgorithmJ, forall: *Forall) !*Type {
         var instantiatedVars = std.AutoHashMap(usize, *Type).init(self.allocator);
 
@@ -302,10 +320,13 @@ pub const AlgorithmJ = struct {
         return try self.copyAndReplace(forall.type, &instantiatedVars);
     }
 
+    // Find all Free Vars contained in a Type
     fn findFreeVars(self: *AlgorithmJ, t: *Type, minDepth: usize, currentFreeVars: *TypeVarSet) !void {
         switch (t.data) {
             .typeVar => |typevar| {
-                std.debug.print("depth: {d}, var: {d}\n", .{ typevar.depth, typevar.n });
+                // If the type variable has too low depth,
+                // it comes from a lambda binding outside
+                // meaning it can not be generalised
                 if (typevar.depth < minDepth) {
                     return;
                 }
@@ -323,6 +344,7 @@ pub const AlgorithmJ = struct {
         }
     }
 
+    // Find all free vars
     fn generalise(self: *AlgorithmJ, t: *Type, minDepth: usize) !*TypeScheme {
         var freeVars = TypeVarSet.init(self.allocator);
         try self.findFreeVars(t, minDepth, &freeVars);
@@ -335,6 +357,7 @@ pub const AlgorithmJ = struct {
         return typeScheme;
     }
 
+    // The main algorithm as described in the paper
     fn run(self: *AlgorithmJ, typeEnv: *TypeEnv, ast: *AST) !*Type {
         errdefer deinitTypeEnv(typeEnv, self.allocator);
         const t = try Type.init(self.allocator);
