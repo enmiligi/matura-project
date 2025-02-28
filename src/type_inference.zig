@@ -5,6 +5,7 @@ const PrimitiveType = enum { Int, Float };
 
 pub const TypeVar = struct {
     n: usize,
+    depth: usize,
     subst: ?*Type,
 };
 
@@ -118,6 +119,7 @@ pub const InferenceError = error{
 pub const AlgorithmJ = struct {
     currentTypeVar: usize = 0,
     allocator: std.mem.Allocator,
+    depth: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator) AlgorithmJ {
         return .{
@@ -135,6 +137,7 @@ pub const AlgorithmJ = struct {
         self.currentTypeVar += 1;
         return .{
             .n = self.currentTypeVar,
+            .depth = self.depth,
             .subst = null,
         };
     }
@@ -143,17 +146,21 @@ pub const AlgorithmJ = struct {
         return .{ .data = .{ .typeVar = self.newVar() }, .rc = 1 };
     }
 
-    fn contains(typeVarA: *TypeVar, typeB: *Type) bool {
+    fn containsAndShiftDepth(typeVarA: *TypeVar, typeB: *Type) bool {
         switch (typeB.data) {
-            .typeVar => |typeVarB| {
+            .typeVar => |*typeVarB| {
                 if (typeVarB.subst) |substB| {
-                    return contains(typeVarA, substB);
+                    return containsAndShiftDepth(typeVarA, substB);
                 } else {
+                    if (typeVarA.depth < typeVarB.depth) {
+                        typeVarB.depth = typeVarA.depth;
+                    }
                     return typeVarA.*.n == typeVarB.n;
                 }
             },
             .function => |functionB| {
-                return contains(typeVarA, functionB.from) or contains(typeVarA, functionB.to);
+                return containsAndShiftDepth(typeVarA, functionB.from) or
+                    containsAndShiftDepth(typeVarA, functionB.to);
             },
             .primitive => |_| {
                 return false;
@@ -162,7 +169,7 @@ pub const AlgorithmJ = struct {
     }
 
     fn addSubstitution(typeVarA: *TypeVar, typeB: *Type) !void {
-        if (contains(typeVarA, typeB)) {
+        if (containsAndShiftDepth(typeVarA, typeB)) {
             return error.InfiniteType;
         }
         typeB.rc += 1;
@@ -230,7 +237,14 @@ pub const AlgorithmJ = struct {
         switch (inputType.data) {
             .typeVar => |typeVar| {
                 if (typeVar.subst) |subst| {
-                    return self.copyAndReplace(subst, replacementMap);
+                    const t = try Type.init(self.allocator);
+                    errdefer self.allocator.destroy(t);
+                    t.data = .{ .typeVar = .{
+                        .n = typeVar.n,
+                        .depth = typeVar.depth,
+                        .subst = try self.copyAndReplace(subst, replacementMap),
+                    } };
+                    return t;
                 } else {
                     if (replacementMap.get(typeVar.n)) |newTypeVar| {
                         newTypeVar.rc += 1;
@@ -262,7 +276,6 @@ pub const AlgorithmJ = struct {
 
     fn instantiate(self: *AlgorithmJ, forall: *Forall) !*Type {
         var instantiatedVars = std.AutoHashMap(usize, *Type).init(self.allocator);
-        defer instantiatedVars.deinit();
 
         var iterator = forall.typeVars.iterator();
         {
@@ -287,6 +300,39 @@ pub const AlgorithmJ = struct {
             instantiatedVars.deinit();
         }
         return try self.copyAndReplace(forall.type, &instantiatedVars);
+    }
+
+    fn findFreeVars(self: *AlgorithmJ, t: *Type, minDepth: usize, currentFreeVars: *TypeVarSet) !void {
+        switch (t.data) {
+            .typeVar => |typevar| {
+                std.debug.print("depth: {d}, var: {d}\n", .{ typevar.depth, typevar.n });
+                if (typevar.depth < minDepth) {
+                    return;
+                }
+                if (typevar.subst) |substitution| {
+                    try self.findFreeVars(substitution, minDepth, currentFreeVars);
+                } else {
+                    try currentFreeVars.put(typevar.n, undefined);
+                }
+            },
+            .function => |function| {
+                try self.findFreeVars(function.from, minDepth, currentFreeVars);
+                try self.findFreeVars(function.to, minDepth, currentFreeVars);
+            },
+            .primitive => {},
+        }
+    }
+
+    fn generalise(self: *AlgorithmJ, t: *Type, minDepth: usize) !*TypeScheme {
+        var freeVars = TypeVarSet.init(self.allocator);
+        try self.findFreeVars(t, minDepth, &freeVars);
+        errdefer freeVars.deinit();
+        const typeScheme = try self.allocator.create(TypeScheme);
+        typeScheme.* = .{ .forall = .{
+            .typeVars = freeVars,
+            .type = t,
+        } };
+        return typeScheme;
     }
 
     fn run(self: *AlgorithmJ, typeEnv: *TypeEnv, ast: *AST) !*Type {
@@ -364,15 +410,18 @@ pub const AlgorithmJ = struct {
             },
             .let => |let| {
                 self.allocator.destroy(t);
+                self.depth += 1;
                 const typeOfVar = try self.run(typeEnv, let.be);
+                self.depth -= 1;
+                const generalised = self.generalise(typeOfVar, self.depth + 1) catch |err| {
+                    typeOfVar.deinit(self.allocator);
+                    return err;
+                };
                 const previous = typeEnv.get(let.name.lexeme);
-                var typeScheme: *TypeScheme = undefined;
                 {
                     errdefer typeOfVar.deinit(self.allocator);
-                    typeScheme = try self.allocator.create(TypeScheme);
-                    typeScheme.* = .{ .type = typeOfVar };
-                    errdefer self.allocator.destroy(typeScheme);
-                    try typeEnv.put(let.name.lexeme, typeScheme);
+                    errdefer self.allocator.destroy(generalised);
+                    try typeEnv.put(let.name.lexeme, generalised);
                 }
                 if (previous) |pT| {
                     errdefer pT.deinit(self.allocator);
@@ -384,7 +433,7 @@ pub const AlgorithmJ = struct {
                 } else {
                     _ = typeEnv.remove(let.name.lexeme);
                 }
-                deinitScheme(typeScheme, self.allocator);
+                deinitScheme(generalised, self.allocator);
                 return typeOfExpr;
             },
         }
