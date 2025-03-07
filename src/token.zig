@@ -18,6 +18,23 @@ pub const TokenType = enum {
     EOF,
 };
 
+pub fn formatTokenType(tt: TokenType) []const u8 {
+    const name = switch (tt) {
+        .Dot => "a dot",
+        .Equal => "an equal sign",
+        .FloatLiteral => "a decimal number",
+        .Identifier => "an identifier",
+        .In => "'in'",
+        .IntLiteral => "an integer",
+        .Lambda => "'lambda'",
+        .LeftParen => "'('",
+        .Let => "'let'",
+        .RightParen => "')'",
+        .EOF => "the end of the file",
+    };
+    return name;
+}
+
 // lexeme = source[start..end]
 // end is one past the last char
 pub const Token = struct {

@@ -1,8 +1,8 @@
 const std = @import("std");
 pub const token = @import("token.zig");
+const errors = @import("./errors.zig");
 
 const LexerError = error{
-    EndOfFile,
     InvalidChar,
 };
 
@@ -15,6 +15,7 @@ pub const Lexer = struct {
     source: []const u8,
     tokenStart: usize = 0,
     location: usize = 0,
+    errs: errors.Errors,
 
     fn isAtEnd(self: *Lexer) bool {
         return self.location == self.source.len;
@@ -46,6 +47,7 @@ pub const Lexer = struct {
                 self.location += 1;
                 return self.makeToken(value);
             } else {
+                try self.errs.errorAt(self.location, self.location + 1, "Invalid Character");
                 return error.InvalidChar;
             }
         }

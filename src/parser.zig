@@ -2,6 +2,7 @@ const std = @import("std");
 const token = @import("./token.zig");
 const lexer = @import("./lexer.zig");
 const AST = @import("./ast.zig").AST;
+const errors = @import("./errors.zig");
 
 const Precedence = usize;
 const PrefixParseFn = *const fn (self: *Parser) anyerror!*AST;
@@ -20,15 +21,17 @@ pub const Parser = struct {
     lexer: *lexer.Lexer,
     next: token.Token,
     atEnd: bool = false,
+    errs: errors.Errors,
 
     // Initialize parser and Lexer
-    pub fn init(allocator: std.mem.Allocator, source: []const u8) !Parser {
+    pub fn init(allocator: std.mem.Allocator, source: []const u8, errs: errors.Errors) !Parser {
         var l = try allocator.create(lexer.Lexer);
-        l.* = .{ .source = source };
+        l.* = .{ .source = source, .errs = errs };
         return .{
             .allocator = allocator,
             .lexer = l,
             .next = try l.getToken(),
+            .errs = errs,
         };
     }
 
@@ -47,7 +50,14 @@ pub const Parser = struct {
     fn expression(self: *Parser, rbp: Precedence) !*AST {
         // nud stands for null denotation
         const nud = self.getNud();
-        const n = nud orelse return error.InvalidPrefix;
+        const n = nud orelse {
+            try self.errs.errorAt(
+                self.peekToken().start,
+                self.peekToken().end,
+                "This can't be used at the beginning of an expression.",
+            );
+            return error.InvalidPrefix;
+        };
         var left = try n(self);
         errdefer left.deinit(self.allocator);
         // led stands for left denotation
@@ -184,6 +194,13 @@ pub const Parser = struct {
 
     fn expectToken(self: *Parser, tt: token.TokenType) !token.Token {
         if (self.peekToken().type != tt) {
+            const msg = try std.fmt.allocPrint(
+                self.allocator,
+                "Expected {s}, got: {s}",
+                .{ token.formatTokenType(tt), token.formatTokenType(self.peekToken().type) },
+            );
+            defer self.allocator.free(msg);
+            try self.errs.errorAt(self.peekToken().start, self.peekToken().end, msg);
             return error.UnexpectedToken;
         } else {
             return self.getToken();

@@ -6,13 +6,14 @@ pub const ast = @import("./ast.zig");
 pub const parser = @import("./parser.zig");
 pub const type_inference = @import("./type_inference.zig");
 pub const interpreter = @import("./interpreter.zig");
-pub const value = @import("value.zig");
+pub const value = @import("./value.zig");
+pub const errors = @import("./errors.zig");
 
 const MainError = error{
     WrongUsage,
 };
 
-pub fn main() !void {
+pub fn main() !u8 {
     // Initialize allocator for memory management
     var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
     const allocator = gpa.allocator();
@@ -57,12 +58,28 @@ pub fn main() !void {
     const fileContents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(fileContents);
 
+    const errs: errors.Errors = .{
+        .stderr = stderr.any(),
+        .source = fileContents,
+        .fileName = consoleArgs[1],
+        .allocator = allocator,
+    };
+
     // Create Parser
-    var fileParser = try parser.Parser.init(allocator, fileContents);
+    var fileParser = try parser.Parser.init(allocator, fileContents, errs);
     defer fileParser.deinit();
 
     // Parse an expression
-    const fileAst = try fileParser.parse();
+    const fileAst = fileParser.parse() catch |err| {
+        if (err == error.InvalidChar or
+            err == error.UnexpectedToken or
+            err == error.InvalidPrefix)
+        {
+            try errbw.flush();
+            return 1;
+        }
+        return err;
+    };
     defer fileAst.deinit(allocator);
     try fileAst.print(stdout.any());
 
@@ -83,8 +100,11 @@ pub fn main() !void {
     try stdout.print(": ", .{});
 
     try type_inference.printType(t, stdout.any());
+    try stdout.print("\n", .{});
 
     try bw.flush();
+
+    return 0;
 }
 
 // This test collects all the tests from imports
