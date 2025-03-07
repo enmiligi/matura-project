@@ -434,21 +434,32 @@ pub const AlgorithmJ = struct {
             .let => |let| {
                 self.allocator.destroy(t);
                 self.depth += 1;
+                const typeOfVarTypeVar = try Type.init(self.allocator);
+                typeOfVarTypeVar.* = self.newVarT();
+                const typeOfVarScheme = self.allocator.create(TypeScheme) catch |err| {
+                    typeOfVarTypeVar.deinit(self.allocator);
+                    return err;
+                };
+                typeOfVarScheme.* = .{ .type = typeOfVarTypeVar };
+                const previous = typeEnv.get(let.name.lexeme);
+                errdefer if (previous) |pT| {
+                    deinitScheme(pT, self.allocator);
+                };
+                {
+                    errdefer deinitScheme(typeOfVarScheme, self.allocator);
+                    try typeEnv.put(let.name.lexeme, typeOfVarScheme);
+                }
                 const typeOfVar = try self.run(typeEnv, let.be);
+                {
+                    errdefer typeOfVar.deinit(self.allocator);
+                    errdefer deinitScheme(typeOfVarScheme, self.allocator);
+                    try self.unify(typeOfVarTypeVar, typeOfVar);
+                }
                 self.depth -= 1;
                 const generalised = self.generalise(typeOfVar, self.depth + 1) catch |err| {
                     typeOfVar.deinit(self.allocator);
                     return err;
                 };
-                const previous = typeEnv.get(let.name.lexeme);
-                {
-                    errdefer typeOfVar.deinit(self.allocator);
-                    errdefer self.allocator.destroy(generalised);
-                    try typeEnv.put(let.name.lexeme, generalised);
-                }
-                if (previous) |pT| {
-                    errdefer pT.deinit(self.allocator);
-                }
                 const typeOfExpr = try self.run(typeEnv, let.in);
                 errdefer typeOfExpr.deinit(self.allocator);
                 if (previous) |previousType| {
@@ -456,6 +467,7 @@ pub const AlgorithmJ = struct {
                 } else {
                     _ = typeEnv.remove(let.name.lexeme);
                 }
+                deinitScheme(typeOfVarScheme, self.allocator);
                 deinitScheme(generalised, self.allocator);
                 return typeOfExpr;
             },
