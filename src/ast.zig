@@ -46,37 +46,35 @@ pub const AST = union(enum) {
         allocator.destroy(self);
     }
 
-    // Only meant to be used for debugging purposes
-    // since not using stdout but debug.print
-    pub fn debugPrint(self: AST) void {
+    pub fn print(self: AST, writer: std.io.AnyWriter) !void {
         switch (self) {
             .let => |let| {
-                std.debug.print("Let(name: {s}, be: ", .{let.name.lexeme});
-                let.be.debugPrint();
-                std.debug.print(", in: ", .{});
-                let.in.debugPrint();
-                std.debug.print(")", .{});
+                try writer.print("Let(name: {s}, be: ", .{let.name.lexeme});
+                try let.be.print(writer);
+                try writer.print(", in: ", .{});
+                try let.in.print(writer);
+                try writer.print(")", .{});
             },
             .lambda => |lambda| {
-                std.debug.print("Lambda(argname: {s}, expr: ", .{lambda.argname.lexeme});
-                lambda.expr.debugPrint();
-                std.debug.print(")", .{});
+                try writer.print("Lambda(argname: {s}, expr: ", .{lambda.argname.lexeme});
+                try lambda.expr.print(writer);
+                try writer.print(")", .{});
             },
             .call => |call| {
-                std.debug.print("Call(function: ", .{});
-                call.function.debugPrint();
-                std.debug.print(", arg: ", .{});
-                call.arg.debugPrint();
-                std.debug.print(")", .{});
+                try writer.print("Call(function: ", .{});
+                try call.function.print(writer);
+                try writer.print(", arg: ", .{});
+                try call.arg.print(writer);
+                try writer.print(")", .{});
             },
             .intConstant => |int| {
-                std.debug.print("Int({s})", .{int.token.lexeme});
+                try writer.print("Int({s})", .{int.token.lexeme});
             },
             .floatConstant => |float| {
-                std.debug.print("Float({s})", .{float.token.lexeme});
+                try writer.print("Float({s})", .{float.token.lexeme});
             },
             .identifier => |id| {
-                std.debug.print("Identifier({s})", .{id.token.lexeme});
+                try writer.print("Identifier({s})", .{id.token.lexeme});
             },
         }
     }

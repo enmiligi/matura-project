@@ -5,6 +5,8 @@ pub const lexer = @import("./lexer.zig");
 pub const ast = @import("./ast.zig");
 pub const parser = @import("./parser.zig");
 pub const type_inference = @import("./type_inference.zig");
+pub const interpreter = @import("./interpreter.zig");
+pub const value = @import("value.zig");
 
 const MainError = error{
     WrongUsage,
@@ -62,19 +64,27 @@ pub fn main() !void {
     // Parse an expression
     const fileAst = try fileParser.parse();
     defer fileAst.deinit(allocator);
-
-    var algorithmJ = type_inference.AlgorithmJ.init(allocator);
-
-    // Print the AST
-    fileAst.debugPrint();
+    try fileAst.print(stdout.any());
 
     try stdout.print("\n", .{});
-    try bw.flush();
+
+    var algorithmJ = type_inference.AlgorithmJ.init(allocator);
 
     const t = try algorithmJ.getType(fileAst);
     defer t.deinit(allocator);
 
-    type_inference.debugPrintType(t);
+    var interpreter_ = interpreter.Interpreter.init(allocator);
+    defer interpreter_.deinit();
+    var hashMap = std.StringHashMap(value.Value).init(allocator);
+    defer hashMap.deinit();
+    const result = try interpreter_.eval(fileAst, &hashMap);
+    try value.printValue(result, stdout.any());
+
+    try stdout.print(": ", .{});
+
+    try type_inference.printType(t, stdout.any());
+
+    try bw.flush();
 }
 
 // This test collects all the tests from imports

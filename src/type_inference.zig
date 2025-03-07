@@ -50,31 +50,31 @@ pub const Type = struct {
     }
 };
 
-pub fn debugPrintType(t: *Type) void {
+pub fn printType(t: *Type, writer: std.io.AnyWriter) !void {
     switch (t.data) {
         .typeVar => |typeVar| {
             if (typeVar.subst) |substitution| {
-                debugPrintType(substitution);
+                try printType(substitution, writer);
             } else {
-                std.debug.print("TypeVar({d}, rc: {d})", .{ typeVar.n, t.rc });
+                try writer.print("TypeVar({d}, rc: {d})", .{ typeVar.n, t.rc });
             }
         },
         .primitive => |primitive| {
             switch (primitive) {
                 .Int => {
-                    std.debug.print("Int(rc: {d})", .{t.rc});
+                    try writer.print("Int(rc: {d})", .{t.rc});
                 },
                 .Float => {
-                    std.debug.print("Float(rc: {d})", .{t.rc});
+                    try writer.print("Float(rc: {d})", .{t.rc});
                 },
             }
         },
         .function => |function| {
-            std.debug.print("(", .{});
-            debugPrintType(function.from);
-            std.debug.print(" -> ", .{});
-            debugPrintType(function.to);
-            std.debug.print(", rc: {d})", .{t.rc});
+            try writer.print("(", .{});
+            try printType(function.from, writer);
+            try writer.print(" -> ", .{});
+            try printType(function.to, writer);
+            try writer.print(", rc: {d})", .{t.rc});
         },
     }
 }
