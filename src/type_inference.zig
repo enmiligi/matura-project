@@ -460,6 +460,11 @@ pub const AlgorithmJ = struct {
                     typeOfVar.deinit(self.allocator);
                     return err;
                 };
+                {
+                    errdefer typeOfVar.deinit(self.allocator);
+                    deinitScheme(typeOfVarScheme, self.allocator);
+                    try typeEnv.put(let.name.lexeme, generalised);
+                }
                 const typeOfExpr = try self.run(typeEnv, let.in);
                 errdefer typeOfExpr.deinit(self.allocator);
                 if (previous) |previousType| {
@@ -467,7 +472,6 @@ pub const AlgorithmJ = struct {
                 } else {
                     _ = typeEnv.remove(let.name.lexeme);
                 }
-                deinitScheme(typeOfVarScheme, self.allocator);
                 deinitScheme(generalised, self.allocator);
                 return typeOfExpr;
             },
