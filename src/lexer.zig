@@ -9,7 +9,7 @@ const LexerError = error{
 // map special identifiers to keyword TokenType
 const identifierMap =
     std.StaticStringMap(token.TokenType)
-    .initComptime(.{ .{ "let", .Let }, .{ "lambda", .Lambda }, .{ "in", .In } });
+        .initComptime(.{ .{ "let", .Let }, .{ "lambda", .Lambda }, .{ "in", .In } });
 
 pub const Lexer = struct {
     source: []const u8,
@@ -78,9 +78,9 @@ pub const Lexer = struct {
         return t;
     }
 
-    // identifier ::= alpha alnum*
+    // identifier ::= alpha (alnum|_)*
     fn identifier(self: *Lexer) token.Token {
-        while (std.ascii.isAlphanumeric(self.getChar())) {
+        while (std.ascii.isAlphanumeric(self.getChar()) or self.getChar() == '_') {
             self.location += 1;
         }
         const tt = identifierMap.get(self.getTokenString()) orelse .Identifier;
