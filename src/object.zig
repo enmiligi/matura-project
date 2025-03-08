@@ -139,7 +139,7 @@ pub const Objects = struct {
         if (GCStressTest or self.objCount > self.objCountUntilGC) {
             self.mark();
             self.sweep();
-            if (self.objCount < self.objCountUntilGC / 2) {
+            if (self.objCount < self.objCountUntilGC / 4) {
                 self.objCountUntilGC /= 2;
             } else if (self.objCount > self.objCountUntilGC) {
                 self.objCountUntilGC *= 2;
