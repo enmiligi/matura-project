@@ -90,11 +90,9 @@ pub fn main() !u8 {
     const t = try algorithmJ.getType(fileAst);
     defer t.deinit(allocator);
 
-    var interpreter_ = interpreter.Interpreter.init(allocator);
+    var interpreter_ = try interpreter.Interpreter.init(allocator);
     defer interpreter_.deinit();
-    var hashMap = std.StringHashMap(value.Value).init(allocator);
-    defer hashMap.deinit();
-    const result = try interpreter_.eval(fileAst, &hashMap);
+    const result = try interpreter_.eval(fileAst);
     try value.printValue(result, stdout.any());
 
     try stdout.print(": ", .{});
