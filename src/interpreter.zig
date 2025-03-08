@@ -37,9 +37,14 @@ pub const Interpreter = struct {
             },
             .let => |let| {
                 const valOfVar = try self.eval(let.be, env);
+                const prev = env.get(let.name.lexeme);
                 try env.put(let.name.lexeme, valOfVar);
                 const result = try self.eval(let.in, env);
-                _ = env.remove(let.name.lexeme);
+                if (prev) |prevValue| {
+                    try env.put(let.name.lexeme, prevValue);
+                } else {
+                    _ = env.remove(let.name.lexeme);
+                }
                 return result;
             },
             .call => |call| {
