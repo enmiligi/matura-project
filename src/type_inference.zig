@@ -474,10 +474,11 @@ pub const AlgorithmJ = struct {
                 defer leftType.deinit(self.allocator);
                 self.unify(leftType, t) catch |err| switch (err) {
                     error.CouldNotUnify => {
-                        try self.errors.typeShouldMatch(
+                        try self.errors.typeComparison(
                             op.left,
                             leftType,
                             t,
+                            "which should be the same as the type of this",
                             "it is given as an argument to a numeric operator:",
                             .{ .start = op.token.start, .end = op.token.end },
                         );
@@ -520,16 +521,25 @@ pub const AlgorithmJ = struct {
                 } };
                 self.unify(t1, fType) catch |err| switch (err) {
                     error.CouldNotUnify => {
-                        try self.errors.typeShouldMatch(
+                        try self.errors.typeComparison(
                             call.function,
                             t1,
                             fType,
-                            "because this is given as an argument to it:",
+                            "should be the same as the type of this",
+                            "this is given as an argument to it:",
                             computeBoundaries(call.arg),
                         );
                         return err;
                     },
-                    else => {
+                    error.InfiniteType => {
+                        try self.errors.typeComparison(
+                            call.function,
+                            t1,
+                            fType,
+                            "leads to an infinite type\nwhen combined with the type of this",
+                            "this is given as an argument to it:",
+                            computeBoundaries(call.arg),
+                        );
                         return err;
                     },
                 };
@@ -592,7 +602,8 @@ pub const AlgorithmJ = struct {
                             try self.errors.recursionTwoTypes(let.be, let.name.lexeme, typeOfVarTypeVar, typeOfVar);
                             return err;
                         },
-                        else => {
+                        error.InfiniteType => {
+                            try self.errors.recursionInfiniteType(let.be, let.name.lexeme, typeOfVarTypeVar, typeOfVar);
                             return err;
                         },
                     };

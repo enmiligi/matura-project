@@ -278,6 +278,42 @@ pub const Errors = struct {
         }
     }
 
+    fn stringCompareTypes(
+        self: *Errors,
+        leftType: *type_inference.Type,
+        rightType: *type_inference.Type,
+    ) !struct { left: std.ArrayList(u8), right: std.ArrayList(u8) } {
+        var leftString = std.ArrayList(u8).init(self.allocator);
+        var rightString = std.ArrayList(u8).init(self.allocator);
+        var currentTypeVar: usize = 0;
+        var leftWriter = leftString.writer();
+        var rightWriter = rightString.writer();
+        try leftWriter.print("\x1b[32m", .{});
+        try rightWriter.print("\x1b[32m", .{});
+        try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar);
+        try leftWriter.print("\x1b[39m", .{});
+        try rightWriter.print("\x1b[39m", .{});
+        return .{ .left = leftString, .right = rightString };
+    }
+
+    pub fn recursionInfiniteType(
+        self: *Errors,
+        ast: *AST,
+        varName: []const u8,
+        leftType: *type_inference.Type,
+        rightType: *type_inference.Type,
+    ) !void {
+        const comparedTypes = try self.stringCompareTypes(leftType, rightType);
+        defer comparedTypes.left.deinit();
+        defer comparedTypes.right.deinit();
+        try self.indicateAST(
+            ast,
+            "The type of {s} when recursing seems to be {s},\nbut {s} is the type inferred when set,\nwhich leads to an infinite type",
+            .{ varName, comparedTypes.left.items, comparedTypes.right.items },
+            true,
+        );
+    }
+
     pub fn recursionTwoTypes(
         self: *Errors,
         ast: *AST,
@@ -285,48 +321,31 @@ pub const Errors = struct {
         leftType: *type_inference.Type,
         rightType: *type_inference.Type,
     ) !void {
-        var leftString = std.ArrayList(u8).init(self.allocator);
-        defer leftString.deinit();
-        var rightString = std.ArrayList(u8).init(self.allocator);
-        defer rightString.deinit();
-        var currentTypeVar: usize = 0;
-        var leftWriter = leftString.writer();
-        var rightWriter = rightString.writer();
-        try leftWriter.print("\x1b[32m", .{});
-        try rightWriter.print("\x1b[32m", .{});
-        try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar);
-        try leftWriter.print("\x1b[39m", .{});
-        try rightWriter.print("\x1b[39m", .{});
+        const comparedTypes = try self.stringCompareTypes(leftType, rightType);
+        defer comparedTypes.left.deinit();
+        defer comparedTypes.right.deinit();
         try self.indicateAST(
             ast,
             "The type of {s} when recursing seems to be {s},\nbut {s} is the type it has",
-            .{ varName, leftString.items, rightString.items },
+            .{ varName, comparedTypes.left.items, comparedTypes.right.items },
             true,
         );
     }
 
-    pub fn typeShouldMatch(
+    pub fn typeComparison(
         self: *Errors,
         ast: *AST,
         leftType: *type_inference.Type,
         rightType: *type_inference.Type,
+        err: []const u8,
         reason: []const u8,
         reasonAt: Region,
     ) !void {
-        var leftString = std.ArrayList(u8).init(self.allocator);
-        defer leftString.deinit();
-        var rightString = std.ArrayList(u8).init(self.allocator);
-        defer rightString.deinit();
-        var currentTypeVar: usize = 0;
-        var leftWriter = leftString.writer();
-        var rightWriter = rightString.writer();
-        try leftWriter.print("\x1b[32m", .{});
-        try rightWriter.print("\x1b[32m", .{});
-        try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar);
-        try leftWriter.print("\x1b[39m", .{});
-        try rightWriter.print("\x1b[39m", .{});
-        try self.indicateAST(ast, "The type of this is: {s}", .{leftString.items}, true);
-        try self.printBold("which should match this type: {s},\nbecause {s}\n", .{ rightString.items, reason });
+        const comparedTypes = try self.stringCompareTypes(leftType, rightType);
+        defer comparedTypes.left.deinit();
+        defer comparedTypes.right.deinit();
+        try self.indicateAST(ast, "The type of this is: {s}", .{comparedTypes.left.items}, true);
+        try self.printBold("which {s}: {s},\nbecause {s}\n", .{ err, comparedTypes.right.items, reason });
         try self.indicateRegion(reasonAt, "", .{}, false);
     }
 
@@ -338,20 +357,11 @@ pub const Errors = struct {
         rightType: *type_inference.Type,
         reasonWhyEqual: []const u8,
     ) !void {
-        var leftString = std.ArrayList(u8).init(self.allocator);
-        defer leftString.deinit();
-        var rightString = std.ArrayList(u8).init(self.allocator);
-        defer rightString.deinit();
-        var currentTypeVar: usize = 0;
-        var leftWriter = leftString.writer();
-        var rightWriter = rightString.writer();
-        try leftWriter.print("\x1b[32m", .{});
-        try rightWriter.print("\x1b[32m", .{});
-        try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar);
-        try leftWriter.print("\x1b[39m", .{});
-        try rightWriter.print("\x1b[39m", .{});
-        try self.indicateAST(astLeft, "The type of this is: {s}", .{leftString.items}, true);
-        try self.indicateAST(astRight, "which should match this type: {s}", .{rightString.items}, false);
+        const comparedTypes = try self.stringCompareTypes(leftType, rightType);
+        defer comparedTypes.left.deinit();
+        defer comparedTypes.right.deinit();
+        try self.indicateAST(astLeft, "The type of this is: {s}", .{comparedTypes.left.items}, true);
+        try self.indicateAST(astRight, "which should match this type: {s}", .{comparedTypes.right.items}, false);
         try self.printBold("because {s}\n", .{reasonWhyEqual});
     }
 

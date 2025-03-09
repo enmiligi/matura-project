@@ -89,7 +89,7 @@ pub fn main() !u8 {
     var algorithmJ = type_inference.AlgorithmJ.init(allocator, &errs);
 
     const t = algorithmJ.getType(fileAst) catch |err| switch (err) {
-        error.UnknownIdentifier, error.CouldNotUnify => {
+        error.UnknownIdentifier, error.CouldNotUnify, error.InfiniteType => {
             try errbw.flush();
             return 1;
         },
