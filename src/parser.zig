@@ -169,9 +169,29 @@ pub const Parser = struct {
         };
     }
 
+    fn operator(self: *Parser, left: *AST) !*AST {
+        errdefer left.deinit(self.allocator);
+        const t = try self.getToken();
+        const prec: usize = switch (t.lexeme[0]) {
+            '+', '-' => 10,
+            '*', '/' => 20,
+            else => undefined,
+        };
+        const right = try self.expression(prec);
+        errdefer right.deinit(self.allocator);
+        const astOp = try self.allocator.create(AST);
+        astOp.* = .{ .operator = .{
+            .token = t,
+            .left = left,
+            .right = right,
+        } };
+        return astOp;
+    }
+
     fn call(self: *Parser, left: *AST) !*AST {
         // A call is left associative, therefore also max precedence
         const expr = try self.expression(std.math.maxInt(Precedence));
+        errdefer expr.deinit(self.allocator);
         const astCall = try self.allocator.create(AST);
         astCall.* = .{ .call = .{ .function = left, .arg = expr } };
         return astCall;
@@ -180,6 +200,14 @@ pub const Parser = struct {
     // get rule for token in the middle of expression (infix, postfix or mixfix)
     fn getLed(self: *Parser) ?InfixParseRule {
         return switch (self.peekToken().type) {
+            .Operator => {
+                const prec: usize = switch (self.peekToken().lexeme[0]) {
+                    '+', '-' => 10,
+                    '*', '/' => 20,
+                    else => undefined,
+                };
+                return .{ operator, prec };
+            },
             else => {
                 // Special rule: Values next to each other leads to function call.
                 // Function call has highest possible precedence

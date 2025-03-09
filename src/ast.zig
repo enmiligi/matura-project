@@ -26,6 +26,11 @@ pub const AST = union(enum) {
     identifier: struct {
         token: token.Token,
     },
+    operator: struct {
+        token: token.Token,
+        left: *AST,
+        right: *AST,
+    },
 
     // Recursively destroy all contained ASTs
     pub fn deinit(self: *AST, allocator: std.mem.Allocator) void {
@@ -40,6 +45,10 @@ pub const AST = union(enum) {
             .call => |call| {
                 call.function.deinit(allocator);
                 call.arg.deinit(allocator);
+            },
+            .operator => |op| {
+                op.left.deinit(allocator);
+                op.right.deinit(allocator);
             },
             else => {},
         }
@@ -75,6 +84,13 @@ pub const AST = union(enum) {
             },
             .identifier => |id| {
                 try writer.print("Identifier({s})", .{id.token.lexeme});
+            },
+            .operator => |op| {
+                try writer.print("(", .{});
+                try op.left.print(writer);
+                try writer.print("{s}", .{op.token.lexeme});
+                try op.right.print(writer);
+                try writer.print(")", .{});
             },
         }
     }

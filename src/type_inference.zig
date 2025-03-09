@@ -3,6 +3,10 @@ const AST = @import("./ast.zig").AST;
 
 const PrimitiveType = enum { Int, Float };
 
+pub const Number = struct {
+    variable: *Type,
+};
+
 // TypeVars are identified by their number
 // The depth assigned is used to efficiently check if you can generalise
 // Substitutions are stored in the TypeVar instead of a global Substitution map.
@@ -21,6 +25,7 @@ pub const Type = struct {
             from: *Type,
             to: *Type,
         },
+        number: Number,
     },
     rc: usize,
 
@@ -43,6 +48,9 @@ pub const Type = struct {
                 .function => |function| {
                     function.from.deinit(allocator);
                     function.to.deinit(allocator);
+                },
+                .number => |num| {
+                    num.variable.deinit(allocator);
                 },
             }
             allocator.destroy(self);
@@ -75,6 +83,11 @@ pub fn printType(t: *Type, writer: std.io.AnyWriter) !void {
             try writer.print(" -> ", .{});
             try printType(function.to, writer);
             try writer.print(", rc: {d})", .{t.rc});
+        },
+        .number => |num| {
+            try writer.print("Number(", .{});
+            try printType(num.variable, writer);
+            try writer.print(")", .{});
         },
     }
 }
@@ -178,6 +191,9 @@ pub const AlgorithmJ = struct {
             .primitive => |_| {
                 return false;
             },
+            .number => |numB| {
+                return containsAndShiftDepth(typeVarA, numB.variable);
+            },
         }
     }
 
@@ -226,6 +242,13 @@ pub const AlgorithmJ = struct {
                     .function => |_| {
                         return error.CouldNotUnify;
                     },
+                    .number => |numB| {
+                        switch (primitiveA) {
+                            .Int, .Float => {
+                                try self.unify(numB.variable, typeA);
+                            },
+                        }
+                    },
                 }
             },
             .function => |functionA| {
@@ -243,6 +266,29 @@ pub const AlgorithmJ = struct {
                         } else {
                             try addSubstitution(typeVarB, typeA);
                         }
+                    },
+                    .number => {
+                        return error.CouldNotUnify;
+                    },
+                }
+            },
+            .number => |numA| {
+                switch (typeB.data) {
+                    .primitive => |prim| {
+                        switch (prim) {
+                            .Int, .Float => {
+                                try self.unify(numA.variable, typeB);
+                            },
+                        }
+                    },
+                    .function => {
+                        return error.CouldNotUnify;
+                    },
+                    .typeVar => {
+                        try self.unify(typeB, typeA);
+                    },
+                    .number => |numB| {
+                        try self.unify(numA.variable, numB.variable);
                     },
                 }
             },
@@ -275,6 +321,15 @@ pub const AlgorithmJ = struct {
             .primitive => |primitive| {
                 const t = try Type.init(self.allocator);
                 t.data = .{ .primitive = primitive };
+                return t;
+            },
+            .number => |num| {
+                const t = try Type.init(self.allocator);
+                errdefer self.allocator.destroy(t);
+                const varCopied = try self.copyAndReplace(num.variable, replacementMap);
+                t.data = .{ .number = .{
+                    .variable = varCopied,
+                } };
                 return t;
             },
             .function => |function| {
@@ -341,6 +396,9 @@ pub const AlgorithmJ = struct {
                 try self.findFreeVars(function.to, minDepth, currentFreeVars);
             },
             .primitive => {},
+            .number => |num| {
+                try self.findFreeVars(num.variable, minDepth, currentFreeVars);
+            },
         }
     }
 
@@ -383,6 +441,23 @@ pub const AlgorithmJ = struct {
             },
             .floatConstant => |_| {
                 t.data = .{ .primitive = .Float };
+            },
+            .operator => |op| {
+                const tV = Type.init(self.allocator) catch |err| {
+                    self.allocator.destroy(t);
+                    return err;
+                };
+                tV.* = self.newVarT();
+                t.data = .{
+                    .number = .{ .variable = tV },
+                };
+                errdefer t.deinit(self.allocator);
+                const leftType = try self.run(typeEnv, op.left);
+                defer leftType.deinit(self.allocator);
+                const rightType = try self.run(typeEnv, op.right);
+                defer rightType.deinit(self.allocator);
+                try self.unify(leftType, rightType);
+                try self.unify(rightType, t);
             },
             .call => |call| {
                 t.* = self.newVarT();

@@ -93,6 +93,48 @@ pub const Interpreter = struct {
         _ = self.currentEnv.contents.remove(name);
     }
 
+    fn evalNumberOp(op: token.Token, left: Value, right: Value) !Value {
+        switch (left) {
+            .int => |int1| {
+                switch (right) {
+                    .int => |int2| {
+                        const res = switch (op.lexeme[0]) {
+                            '+' => int1 + int2,
+                            '-' => int1 - int2,
+                            '*' => int1 * int2,
+                            '/' => @divFloor(int1, int2),
+                            else => undefined,
+                        };
+                        return .{ .int = res };
+                    },
+                    else => {
+                        return error.UnexpectedType;
+                    },
+                }
+            },
+            .float => |float1| {
+                switch (right) {
+                    .float => |float2| {
+                        const res = switch (op.lexeme[0]) {
+                            '+' => float1 + float2,
+                            '-' => float1 - float2,
+                            '*' => float1 * float2,
+                            '/' => float1 / float2,
+                            else => undefined,
+                        };
+                        return .{ .float = res };
+                    },
+                    else => {
+                        return error.UnexpectedType;
+                    },
+                }
+            },
+            else => {
+                return error.UnexpectedType;
+            },
+        }
+    }
+
     pub fn eval(self: *Interpreter, ast: *AST) !Value {
         switch (ast.*) {
             .intConstant => |intC| {
@@ -147,6 +189,20 @@ pub const Interpreter = struct {
                 const boundEnv = try self.currentEnv.contents.clone();
                 const closure = try self.objects.makeClosure(lambda.argname, boundEnv, lambda.expr);
                 return .{ .object = closure };
+            },
+            .operator => |op| {
+                const left = try self.eval(op.left);
+                try self.pushValue(left);
+                const right = try self.eval(op.right);
+                self.popValue();
+                switch (op.token.lexeme[0]) {
+                    '+', '-', '*', '/' => {
+                        return evalNumberOp(op.token, left, right);
+                    },
+                    else => {
+                        return undefined;
+                    },
+                }
             },
         }
     }

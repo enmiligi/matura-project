@@ -9,6 +9,7 @@ pub const TokenType = enum {
     Equal,
     LeftParen,
     RightParen,
+    Operator,
     // literals
     FloatLiteral,
     IntLiteral,
@@ -31,6 +32,7 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .Let => "'let'",
         .RightParen => "')'",
         .EOF => "the end of the file",
+        .Operator => "an operator",
     };
     return name;
 }
