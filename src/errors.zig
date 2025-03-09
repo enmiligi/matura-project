@@ -39,7 +39,7 @@ pub const Errors = struct {
         try self.printYellow("{s}\n", .{contents});
     }
 
-    fn computeBoundaries(ast: *AST) Region {
+    pub fn computeBoundaries(ast: *AST) Region {
         switch (ast.*) {
             .intConstant => |iC| {
                 return .{ .start = iC.token.start, .end = iC.token.end };
@@ -276,6 +276,58 @@ pub const Errors = struct {
                 }
             },
         }
+    }
+
+    pub fn recursionTwoTypes(
+        self: *Errors,
+        ast: *AST,
+        varName: []const u8,
+        leftType: *type_inference.Type,
+        rightType: *type_inference.Type,
+    ) !void {
+        var leftString = std.ArrayList(u8).init(self.allocator);
+        defer leftString.deinit();
+        var rightString = std.ArrayList(u8).init(self.allocator);
+        defer rightString.deinit();
+        var currentTypeVar: usize = 0;
+        var leftWriter = leftString.writer();
+        var rightWriter = rightString.writer();
+        try leftWriter.print("\x1b[32m", .{});
+        try rightWriter.print("\x1b[32m", .{});
+        try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar);
+        try leftWriter.print("\x1b[39m", .{});
+        try rightWriter.print("\x1b[39m", .{});
+        try self.indicateAST(
+            ast,
+            "The type of {s} when recursing seems to be {s},\nbut {s} is the type it has",
+            .{ varName, leftString.items, rightString.items },
+            true,
+        );
+    }
+
+    pub fn typeShouldMatch(
+        self: *Errors,
+        ast: *AST,
+        leftType: *type_inference.Type,
+        rightType: *type_inference.Type,
+        reason: []const u8,
+        reasonAt: Region,
+    ) !void {
+        var leftString = std.ArrayList(u8).init(self.allocator);
+        defer leftString.deinit();
+        var rightString = std.ArrayList(u8).init(self.allocator);
+        defer rightString.deinit();
+        var currentTypeVar: usize = 0;
+        var leftWriter = leftString.writer();
+        var rightWriter = rightString.writer();
+        try leftWriter.print("\x1b[32m", .{});
+        try rightWriter.print("\x1b[32m", .{});
+        try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar);
+        try leftWriter.print("\x1b[39m", .{});
+        try rightWriter.print("\x1b[39m", .{});
+        try self.indicateAST(ast, "The type of this is: {s}", .{leftString.items}, true);
+        try self.printBold("which should match this type: {s},\nbecause {s}\n", .{ rightString.items, reason });
+        try self.indicateRegion(reasonAt, "", .{}, false);
     }
 
     pub fn typeMismatch(

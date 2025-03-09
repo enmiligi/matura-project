@@ -1,6 +1,1 @@
-let double = lambda x. x + x in let six = double 3 in
-    (
-        lambda x.
-            5
-    )
-    + (lambda x. lambda y. 2.3)
+let f = lambda x. f + 2 in f 3

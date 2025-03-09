@@ -1,6 +1,7 @@
 const std = @import("std");
 const AST = @import("./ast.zig").AST;
 const Errors = @import("./errors.zig").Errors;
+const computeBoundaries = @import("./errors.zig").Errors.computeBoundaries;
 
 const PrimitiveType = enum { Int, Float };
 
@@ -471,6 +472,21 @@ pub const AlgorithmJ = struct {
                 errdefer t.deinit(self.allocator);
                 const leftType = try self.run(typeEnv, op.left);
                 defer leftType.deinit(self.allocator);
+                self.unify(leftType, t) catch |err| switch (err) {
+                    error.CouldNotUnify => {
+                        try self.errors.typeShouldMatch(
+                            op.left,
+                            leftType,
+                            t,
+                            "it is given as an argument to a numeric operator:",
+                            .{ .start = op.token.start, .end = op.token.end },
+                        );
+                        return err;
+                    },
+                    else => {
+                        return err;
+                    },
+                };
                 const rightType = try self.run(typeEnv, op.right);
                 defer rightType.deinit(self.allocator);
                 self.unify(leftType, rightType) catch |err| switch (err) {
@@ -488,7 +504,6 @@ pub const AlgorithmJ = struct {
                         return err;
                     },
                 };
-                try self.unify(rightType, t);
             },
             .call => |call| {
                 t.* = self.newVarT();
@@ -503,7 +518,21 @@ pub const AlgorithmJ = struct {
                     .from = t2,
                     .to = t,
                 } };
-                try self.unify(t1, fType);
+                self.unify(t1, fType) catch |err| switch (err) {
+                    error.CouldNotUnify => {
+                        try self.errors.typeShouldMatch(
+                            call.function,
+                            t1,
+                            fType,
+                            "because this is given as an argument to it:",
+                            computeBoundaries(call.arg),
+                        );
+                        return err;
+                    },
+                    else => {
+                        return err;
+                    },
+                };
             },
             .lambda => |lambda| {
                 errdefer self.allocator.destroy(t);
@@ -558,8 +587,15 @@ pub const AlgorithmJ = struct {
                 const typeOfVar = try self.run(typeEnv, let.be);
                 {
                     errdefer typeOfVar.deinit(self.allocator);
-                    errdefer deinitScheme(typeOfVarScheme, self.allocator);
-                    try self.unify(typeOfVarTypeVar, typeOfVar);
+                    self.unify(typeOfVarTypeVar, typeOfVar) catch |err| switch (err) {
+                        error.CouldNotUnify => {
+                            try self.errors.recursionTwoTypes(let.be, let.name.lexeme, typeOfVarTypeVar, typeOfVar);
+                            return err;
+                        },
+                        else => {
+                            return err;
+                        },
+                    };
                 }
                 self.depth -= 1;
                 const generalised = self.generalise(typeOfVar, self.depth + 1) catch |err| {
