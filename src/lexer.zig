@@ -15,7 +15,7 @@ pub const Lexer = struct {
     source: []const u8,
     tokenStart: usize = 0,
     location: usize = 0,
-    errs: errors.Errors,
+    errs: *errors.Errors,
 
     fn isAtEnd(self: *Lexer) bool {
         return self.location == self.source.len;

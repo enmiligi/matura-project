@@ -58,36 +58,45 @@ pub fn main() !u8 {
     const fileContents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(fileContents);
 
-    const errs: errors.Errors = .{
+    var errs: errors.Errors = .{
         .stderr = stderr.any(),
         .source = fileContents,
         .fileName = consoleArgs[1],
         .allocator = allocator,
+        .typeVarMap = .init(allocator),
     };
+    defer errs.deinit();
 
     // Create Parser
-    var fileParser = try parser.Parser.init(allocator, fileContents, errs);
+    var fileParser = try parser.Parser.init(allocator, fileContents, &errs);
     defer fileParser.deinit();
 
     // Parse an expression
-    const fileAst = fileParser.parse() catch |err| {
-        if (err == error.InvalidChar or
-            err == error.UnexpectedToken or
-            err == error.InvalidPrefix)
-        {
+    const fileAst = fileParser.parse() catch |err| switch (err) {
+        error.InvalidChar, error.UnexpectedToken, error.InvalidPrefix => {
             try errbw.flush();
             return 1;
-        }
-        return err;
+        },
+        else => {
+            return err;
+        },
     };
     defer fileAst.deinit(allocator);
     try fileAst.print(stdout.any());
 
     try stdout.print("\n", .{});
 
-    var algorithmJ = type_inference.AlgorithmJ.init(allocator);
+    var algorithmJ = type_inference.AlgorithmJ.init(allocator, &errs);
 
-    const t = try algorithmJ.getType(fileAst);
+    const t = algorithmJ.getType(fileAst) catch |err| switch (err) {
+        error.UnknownIdentifier, error.CouldNotUnify => {
+            try errbw.flush();
+            return 1;
+        },
+        else => {
+            return err;
+        },
+    };
     defer t.deinit(allocator);
 
     var interpreter_ = try interpreter.Interpreter.init(allocator);
@@ -97,7 +106,10 @@ pub fn main() !u8 {
 
     try stdout.print(": ", .{});
 
-    try type_inference.printType(t, stdout.any());
+    var currentTypeVar: usize = 0;
+    var typeVarMap = std.AutoHashMap(usize, usize).init(allocator);
+
+    try type_inference.printType(t, stdout.any(), &currentTypeVar, &typeVarMap);
     try stdout.print("\n", .{});
 
     try bw.flush();

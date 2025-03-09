@@ -1,5 +1,6 @@
 const std = @import("std");
 const AST = @import("./ast.zig").AST;
+const Errors = @import("./errors.zig").Errors;
 
 const PrimitiveType = enum { Int, Float };
 
@@ -58,35 +59,48 @@ pub const Type = struct {
     }
 };
 
-pub fn printType(t: *Type, writer: std.io.AnyWriter) !void {
+pub fn printType(t: *Type, writer: std.io.AnyWriter, currentTypeVar: *usize, typeVarMap: *std.AutoHashMap(usize, usize)) !void {
     switch (t.data) {
         .typeVar => |typeVar| {
             if (typeVar.subst) |substitution| {
-                try printType(substitution, writer);
+                try printType(substitution, writer, currentTypeVar, typeVarMap);
             } else {
-                try writer.print("TypeVar({d}, rc: {d})", .{ typeVar.n, t.rc });
+                var varNum: usize = undefined;
+                if (typeVarMap.get(typeVar.n)) |num| {
+                    varNum = num;
+                } else {
+                    varNum = currentTypeVar.*;
+                    try typeVarMap.put(typeVar.n, varNum);
+                    currentTypeVar.* += 1;
+                }
+                if (varNum < 26) {
+                    const byteVarNum: u8 = @intCast(varNum);
+                    try writer.print("{c}", .{'a' + byteVarNum});
+                } else {
+                    try writer.print("var_{d}", .{currentTypeVar.* - 26});
+                }
             }
         },
         .primitive => |primitive| {
             switch (primitive) {
                 .Int => {
-                    try writer.print("Int(rc: {d})", .{t.rc});
+                    try writer.print("Int", .{});
                 },
                 .Float => {
-                    try writer.print("Float(rc: {d})", .{t.rc});
+                    try writer.print("Float", .{});
                 },
             }
         },
         .function => |function| {
             try writer.print("(", .{});
-            try printType(function.from, writer);
+            try printType(function.from, writer, currentTypeVar, typeVarMap);
             try writer.print(" -> ", .{});
-            try printType(function.to, writer);
-            try writer.print(", rc: {d})", .{t.rc});
+            try printType(function.to, writer, currentTypeVar, typeVarMap);
+            try writer.print(")", .{});
         },
         .number => |num| {
             try writer.print("Number(", .{});
-            try printType(num.variable, writer);
+            try printType(num.variable, writer, currentTypeVar, typeVarMap);
             try writer.print(")", .{});
         },
     }
@@ -143,10 +157,12 @@ pub const AlgorithmJ = struct {
     currentTypeVar: usize = 0,
     allocator: std.mem.Allocator,
     depth: usize = 0,
+    errors: *Errors,
 
-    pub fn init(allocator: std.mem.Allocator) AlgorithmJ {
+    pub fn init(allocator: std.mem.Allocator, errs: *Errors) AlgorithmJ {
         return .{
             .allocator = allocator,
+            .errors = errs,
         };
     }
 
@@ -433,6 +449,7 @@ pub const AlgorithmJ = struct {
                         },
                     }
                 } else {
+                    try self.errors.errorAt(id.token.start, id.token.end, "Unknown identifier");
                     return error.UnknownIdentifier;
                 }
             },
@@ -456,7 +473,15 @@ pub const AlgorithmJ = struct {
                 defer leftType.deinit(self.allocator);
                 const rightType = try self.run(typeEnv, op.right);
                 defer rightType.deinit(self.allocator);
-                try self.unify(leftType, rightType);
+                self.unify(leftType, rightType) catch |err| switch (err) {
+                    error.CouldNotUnify => {
+                        try self.errors.typeMismatch(op.left, op.right, leftType, rightType, "are arguments to numeric operator");
+                        return err;
+                    },
+                    else => {
+                        return err;
+                    },
+                };
                 try self.unify(rightType, t);
             },
             .call => |call| {

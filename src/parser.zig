@@ -21,10 +21,10 @@ pub const Parser = struct {
     lexer: *lexer.Lexer,
     next: token.Token,
     atEnd: bool = false,
-    errs: errors.Errors,
+    errs: *errors.Errors,
 
     // Initialize parser and Lexer
-    pub fn init(allocator: std.mem.Allocator, source: []const u8, errs: errors.Errors) !Parser {
+    pub fn init(allocator: std.mem.Allocator, source: []const u8, errs: *errors.Errors) !Parser {
         var l = try allocator.create(lexer.Lexer);
         l.* = .{ .source = source, .errs = errs };
         return .{
