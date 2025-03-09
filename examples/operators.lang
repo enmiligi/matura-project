@@ -1,1 +1,7 @@
-let double = lambda x. x + x in let six = double 3 in double 3.7
+let double = lambda x. x + x in let six = double 3 in
+    (
+        lambda x.
+
+            5
+    )
+    + (lambda x. 2.3)

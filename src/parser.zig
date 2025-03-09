@@ -55,6 +55,7 @@ pub const Parser = struct {
                 self.peekToken().start,
                 self.peekToken().end,
                 "This can't be used at the beginning of an expression.",
+                .{},
             );
             return error.InvalidPrefix;
         };
@@ -113,6 +114,7 @@ pub const Parser = struct {
 
     // let ::= Let Identifier Equal expr In expr
     fn let(self: *Parser) !*AST {
+        const start = self.peekToken().start;
         _ = try self.getToken();
 
         const name = try self.expectToken(.Identifier);
@@ -129,6 +131,7 @@ pub const Parser = struct {
 
         const letExpr = try self.allocator.create(AST);
         letExpr.* = .{ .let = .{
+            .start = start,
             .name = name,
             .be = be,
             .in = in,
@@ -138,6 +141,7 @@ pub const Parser = struct {
 
     // lambda ::= Lambda Identifier Dot Expr
     fn lambda(self: *Parser) !*AST {
+        const start = self.peekToken().start;
         _ = try self.getToken();
 
         const argname = try self.expectToken(.Identifier);
@@ -149,6 +153,7 @@ pub const Parser = struct {
 
         const lambdaExpr = try self.allocator.create(AST);
         lambdaExpr.* = .{ .lambda = .{
+            .start = start,
             .argname = argname,
             .expr = expr,
         } };
@@ -222,13 +227,12 @@ pub const Parser = struct {
 
     fn expectToken(self: *Parser, tt: token.TokenType) !token.Token {
         if (self.peekToken().type != tt) {
-            const msg = try std.fmt.allocPrint(
-                self.allocator,
+            try self.errs.errorAt(
+                self.peekToken().start,
+                self.peekToken().end,
                 "Expected {s}, got: {s}",
                 .{ token.formatTokenType(tt), token.formatTokenType(self.peekToken().type) },
             );
-            defer self.allocator.free(msg);
-            try self.errs.errorAt(self.peekToken().start, self.peekToken().end, msg);
             return error.UnexpectedToken;
         } else {
             return self.getToken();

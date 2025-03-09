@@ -3,6 +3,11 @@ const Token = @import("./token.zig").Token;
 const type_inference = @import("./type_inference.zig");
 const AST = @import("./ast.zig").AST;
 
+const Region = struct {
+    start: usize,
+    end: usize,
+};
+
 pub const Errors = struct {
     fileName: []const u8,
     source: []const u8,
@@ -16,24 +21,132 @@ pub const Errors = struct {
         self.typeVarMap.deinit();
     }
 
-    fn printIndicator(self: *Errors, start: usize, end: usize) !void {
-        const leftPad = try self.allocator.alloc(u8, start);
-        defer self.allocator.free(leftPad);
-        @memset(leftPad, ' ');
-        const indicator = try self.allocator.alloc(u8, end - start);
-        defer self.allocator.free(indicator);
-        @memset(indicator, '^');
-        try self.stderr.print("{s}\x1b[33m{s}\x1b[m\n", .{ leftPad, indicator });
+    fn printIndicator(self: *Errors, startIndex: usize, start: usize, end: usize) !void {
+        const contents = try self.allocator.alloc(u8, end);
+        defer self.allocator.free(contents);
+        var i: usize = 0;
+        var allWhitespace: bool = true;
+        while (i < end) : (i += 1) {
+            if (i < start) {
+                contents[i] = ' ';
+            } else if (self.source[startIndex + i] == ' ' and allWhitespace) {
+                contents[i] = ' ';
+            } else {
+                allWhitespace = false;
+                contents[i] = '^';
+            }
+        }
+        try self.printYellow("{s}\n", .{contents});
     }
 
-    fn printError(self: *Errors, msg: []const u8) !void {
-        try self.stderr.print("\x1b[31;1merror: {s}\x1b[m", .{msg});
+    fn computeBoundaries(ast: *AST) Region {
+        switch (ast.*) {
+            .intConstant => |iC| {
+                return .{ .start = iC.token.start, .end = iC.token.end };
+            },
+            .floatConstant => |fC| {
+                return .{ .start = fC.token.start, .end = fC.token.end };
+            },
+            .lambda => |lambda| {
+                const end = computeBoundaries(lambda.expr).end;
+                return .{ .start = lambda.start, .end = end };
+            },
+            .call => |call| {
+                const end = computeBoundaries(call.arg).end;
+                const start = computeBoundaries(call.function).start;
+                return .{ .start = start, .end = end };
+            },
+            .let => |let| {
+                const end = computeBoundaries(let.in).end;
+                return .{ .start = let.start, .end = end };
+            },
+            .identifier => |id| {
+                return .{ .start = id.token.start, .end = id.token.end };
+            },
+            .operator => |op| {
+                const start = computeBoundaries(op.left).start;
+                const end = computeBoundaries(op.right).end;
+                return .{ .start = start, .end = end };
+            },
+        }
+    }
+
+    fn indicateRegion(self: *Errors, region: Region, comptime msg: []const u8, args: anytype, err: bool) !void {
+        var startLine: usize = 0;
+        var startOfLine: usize = 0;
+        var endOfLine: usize = 0;
+        var i: usize = 0;
+        while (i <= region.start) : (i += 1) {
+            if (self.source[i] == '\n') {
+                startLine += 1;
+                startOfLine = i + 1;
+            }
+        }
+        while (i != self.source.len and self.source[i] != '\n') {
+            i += 1;
+        }
+        endOfLine = i;
+        var endLine: usize = startLine;
+        var startOfEndLine = i + 1;
+        while (i < region.end) : (i += 1) {
+            if (self.source[i] == '\n') {
+                endLine += 1;
+                startOfEndLine = i + 1;
+            }
+        }
+        while (i != self.source.len and self.source[i] != '\n') {
+            i += 1;
+        }
+        try self.printBold("{s}:{d}:{d}: ", .{
+            self.fileName,
+            startLine + 1,
+            region.start - startOfLine + 1,
+        });
+        if (err) {
+            try self.printError(msg, args);
+        } else {
+            try self.printBold(msg, args);
+        }
+        try self.stderr.print("\n{s}\n", .{self.source[startOfLine..endOfLine]});
+        try self.printIndicator(startOfLine, region.start - startOfLine, @min(endOfLine, region.end) - startOfLine);
+        if (startLine != endLine) {
+            if (endLine - startLine > 1) {
+                try self.stderr.print("    ...\n", .{});
+            }
+            try self.stderr.print("{s}\n", .{self.source[startOfEndLine..i]});
+            try self.printIndicator(startOfEndLine, 0, @min(i, region.end) - startOfEndLine);
+        }
+    }
+
+    fn indicateAST(self: *Errors, ast: *AST, comptime msg: []const u8, args: anytype, err: bool) !void {
+        try self.indicateRegion(computeBoundaries(ast), msg, args, err);
+    }
+
+    fn printError(self: *Errors, comptime msg: []const u8, args: anytype) !void {
+        try self.printBold("\x1b[31merror: \x1b[39m", .{});
+        try self.printBold(msg, args);
+    }
+
+    fn printYellow(self: *Errors, comptime msg: []const u8, args: anytype) !void {
+        try self.stderr.print("\x1b[33m", .{});
+        try self.printBold(msg, args);
+        try self.stderr.print("\x1b[39m", .{});
+    }
+
+    fn printBold(self: *Errors, comptime msg: []const u8, args: anytype) !void {
+        try self.stderr.print("\x1b[1m", .{});
+        try self.stderr.print(msg, args);
+        try self.stderr.print("\x1b[22m", .{});
     }
 
     fn printType(self: *Errors, t: *type_inference.Type, writer: std.io.AnyWriter, currentTypeVar: *usize, err: bool) !void {
-        if (err) try writer.print("\x1b[33;1m", .{});
+        if (err) {
+            try writer.print("\x1b[33;1m", .{});
+        } else {
+            try writer.print("\x1b[32;1m", .{});
+        }
         try type_inference.printType(t, writer, currentTypeVar, &self.typeVarMap);
-        if (err) try writer.print("\x1b[m", .{});
+        try writer.print("\x1b[32m", .{});
     }
 
     fn compareTypes(
@@ -178,15 +291,19 @@ pub const Errors = struct {
         var rightString = std.ArrayList(u8).init(self.allocator);
         defer rightString.deinit();
         var currentTypeVar: usize = 0;
-        _ = astLeft;
-        _ = astRight;
-        _ = reasonWhyEqual;
-        try self.compareTypes(leftType, rightType, leftString.writer().any(), rightString.writer().any(), &currentTypeVar);
-        try self.stderr.print("{s}\n", .{leftString.items});
-        try self.stderr.print("{s}\n", .{rightString.items});
+        var leftWriter = leftString.writer();
+        var rightWriter = rightString.writer();
+        try leftWriter.print("\x1b[32m", .{});
+        try rightWriter.print("\x1b[32m", .{});
+        try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar);
+        try leftWriter.print("\x1b[39m", .{});
+        try rightWriter.print("\x1b[39m", .{});
+        try self.indicateAST(astLeft, "The type of this is: {s}", .{leftString.items}, true);
+        try self.indicateAST(astRight, "which should match this type: {s}", .{rightString.items}, false);
+        try self.printBold("because {s}\n", .{reasonWhyEqual});
     }
 
-    pub fn errorAt(self: *Errors, start: usize, end: usize, msg: []const u8) !void {
+    pub fn errorAt(self: *Errors, start: usize, end: usize, comptime msg: []const u8, args: anytype) !void {
         var line: usize = 0;
         var startOfLine: usize = 0;
         var i: usize = 0;
@@ -199,13 +316,13 @@ pub const Errors = struct {
         while (i != self.source.len and self.source[i] != '\n') {
             i += 1;
         }
-        try self.stderr.print("{s}:{d}:{d}: ", .{
+        try self.stderr.print("\x1b[1m{s}:{d}:{d}:\x1b[m ", .{
             self.fileName,
             line + 1,
             start - startOfLine + 1,
         });
-        try self.printError(msg);
+        try self.printError(msg, args);
         try self.stderr.print("\n{s}\n", .{self.source[startOfLine..i]});
-        try self.printIndicator(start - startOfLine, end - startOfLine);
+        try self.printIndicator(startOfLine, start - startOfLine, end - startOfLine);
     }
 };

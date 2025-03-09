@@ -48,7 +48,7 @@ pub const Lexer = struct {
                 self.location += 1;
                 return self.makeToken(value);
             } else {
-                try self.errs.errorAt(self.location, self.location + 1, "Invalid Character");
+                try self.errs.errorAt(self.location, self.location + 1, "Invalid Character", .{});
                 return error.InvalidChar;
             }
         }

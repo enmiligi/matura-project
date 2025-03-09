@@ -449,7 +449,7 @@ pub const AlgorithmJ = struct {
                         },
                     }
                 } else {
-                    try self.errors.errorAt(id.token.start, id.token.end, "Unknown identifier");
+                    try self.errors.errorAt(id.token.start, id.token.end, "Unknown identifier", .{});
                     return error.UnknownIdentifier;
                 }
             },
@@ -475,7 +475,13 @@ pub const AlgorithmJ = struct {
                 defer rightType.deinit(self.allocator);
                 self.unify(leftType, rightType) catch |err| switch (err) {
                     error.CouldNotUnify => {
-                        try self.errors.typeMismatch(op.left, op.right, leftType, rightType, "are arguments to numeric operator");
+                        try self.errors.typeMismatch(
+                            op.left,
+                            op.right,
+                            leftType,
+                            rightType,
+                            "they are arguments to the same numeric operator",
+                        );
                         return err;
                     },
                     else => {

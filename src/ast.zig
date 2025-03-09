@@ -3,11 +3,13 @@ const token = @import("./token.zig");
 
 pub const AST = union(enum) {
     let: struct {
+        start: usize,
         name: token.Token,
         be: *AST,
         in: *AST,
     },
     lambda: struct {
+        start: usize,
         argname: token.Token,
         expr: *AST,
     },
