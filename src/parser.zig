@@ -39,6 +39,16 @@ pub const Parser = struct {
         self.allocator.destroy(self.lexer);
     }
 
+    pub fn parseToEnd(self: *Parser) !*AST {
+        const res = try self.parse();
+        if (!(self.peekToken().type == .EOF)) {
+            res.deinit(self.allocator);
+            try self.errs.errorAt(self.peekToken().start, self.peekToken().end, "Unexpected token", .{});
+            return error.UnexpectedToken;
+        }
+        return res;
+    }
+
     // At the moment everything is an expression
     pub fn parse(self: *Parser) !*AST {
         return self.expression(0);

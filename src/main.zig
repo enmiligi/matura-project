@@ -72,7 +72,7 @@ pub fn main() !u8 {
     defer fileParser.deinit();
 
     // Parse an expression
-    const fileAst = fileParser.parse() catch |err| switch (err) {
+    const fileAst = fileParser.parseToEnd() catch |err| switch (err) {
         error.InvalidChar, error.UnexpectedToken, error.InvalidPrefix => {
             try errbw.flush();
             return 1;
