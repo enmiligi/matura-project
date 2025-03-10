@@ -181,6 +181,32 @@ pub const Parser = struct {
         return lambdaExpr;
     }
 
+    fn ifExpr(self: *Parser) !*AST {
+        const start = (try self.getToken()).start;
+
+        const predicate = try self.expression(0);
+        errdefer predicate.deinit(self.allocator);
+
+        _ = try self.expectToken(.Then);
+
+        const thenExpr = try self.expression(0);
+        errdefer thenExpr.deinit(self.allocator);
+
+        _ = try self.expectToken(.Else);
+
+        const elseExpr = try self.expression(0);
+        errdefer elseExpr.deinit(self.allocator);
+
+        const ifAST = try self.allocator.create(AST);
+        ifAST.* = .{ .ifExpr = .{
+            .start = start,
+            .predicate = predicate,
+            .thenExpr = thenExpr,
+            .elseExpr = elseExpr,
+        } };
+        return ifAST;
+    }
+
     // Get rule in prefix position
     fn getNud(self: *Parser) ?PrefixParseFn {
         return switch (self.peekToken().type) {
@@ -191,6 +217,7 @@ pub const Parser = struct {
             token.TokenType.Identifier => identifier,
             token.TokenType.Let => let,
             token.TokenType.Lambda => lambda,
+            token.TokenType.If => ifExpr,
             else => null,
         };
     }

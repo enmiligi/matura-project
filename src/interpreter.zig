@@ -188,6 +188,14 @@ pub const Interpreter = struct {
             .floatConstant => |floatC| {
                 return .{ .float = floatC.value };
             },
+            .ifExpr => |ifExpr| {
+                const predicate = try self.eval(ifExpr.predicate);
+                if (predicate.bool) {
+                    return self.eval(ifExpr.thenExpr);
+                } else {
+                    return self.eval(ifExpr.elseExpr);
+                }
+            },
             .identifier => |id| {
                 const value = self.lookup(id.token.lexeme);
                 if (value) |val| {

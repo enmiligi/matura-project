@@ -518,6 +518,52 @@ pub const AlgorithmJ = struct {
                     },
                 };
             },
+            .ifExpr => |ifExpr| {
+                self.allocator.destroy(t);
+                const boolT = try Type.init(self.allocator);
+                boolT.data = .{
+                    .primitive = .Bool,
+                };
+                defer boolT.deinit(self.allocator);
+                const typeOfPredicate = try self.run(typeEnv, ifExpr.predicate);
+                defer typeOfPredicate.deinit(self.allocator);
+                self.unify(boolT, typeOfPredicate) catch |err| switch (err) {
+                    error.CouldNotUnify => {
+                        try self.errors.typeComparison(
+                            ifExpr.predicate,
+                            typeOfPredicate,
+                            boolT,
+                            "should have this type: ",
+                            "it is an if predicate",
+                            .{ .start = ifExpr.start, .end = ifExpr.start + 2 },
+                        );
+                        return err;
+                    },
+                    else => {
+                        return err;
+                    },
+                };
+                const typeOfThen = try self.run(typeEnv, ifExpr.thenExpr);
+                defer typeOfThen.deinit(self.allocator);
+                const typeOfElse = try self.run(typeEnv, ifExpr.elseExpr);
+                errdefer typeOfElse.deinit(self.allocator);
+                self.unify(typeOfThen, typeOfElse) catch |err| switch (err) {
+                    error.CouldNotUnify => {
+                        try self.errors.typeMismatch(
+                            ifExpr.thenExpr,
+                            ifExpr.elseExpr,
+                            typeOfThen,
+                            typeOfElse,
+                            "they are the two branches of an if expression",
+                        );
+                        return err;
+                    },
+                    else => {
+                        return err;
+                    },
+                };
+                return typeOfElse;
+            },
             .call => |call| {
                 t.* = self.newVarT();
                 errdefer t.deinit(self.allocator);

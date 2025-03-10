@@ -50,6 +50,10 @@ pub const Errors = struct {
             .boolConstant => |bC| {
                 return .{ .start = bC.token.start, .end = bC.token.end };
             },
+            .ifExpr => |ifExpr| {
+                const end = computeBoundaries(ifExpr.elseExpr).end;
+                return .{ .start = ifExpr.start, .end = end };
+            },
             .lambda => |lambda| {
                 const end = computeBoundaries(lambda.expr).end;
                 return .{ .start = lambda.start, .end = end };

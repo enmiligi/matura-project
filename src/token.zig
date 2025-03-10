@@ -4,6 +4,9 @@ pub const TokenType = enum {
     In,
     Let,
     Lambda,
+    If,
+    Then,
+    Else,
     // special characters
     Dot,
     Equal,
@@ -35,6 +38,9 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .EOF => "the end of the file",
         .Operator => "an operator",
         .BoolLiteral => "a boolean value",
+        .If => "'if'",
+        .Then => "'then'",
+        .Else => "'else'",
     };
     return name;
 }

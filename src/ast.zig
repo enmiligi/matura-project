@@ -13,6 +13,12 @@ pub const AST = union(enum) {
         argname: token.Token,
         expr: *AST,
     },
+    ifExpr: struct {
+        start: usize,
+        predicate: *AST,
+        thenExpr: *AST,
+        elseExpr: *AST,
+    },
     call: struct {
         function: *AST,
         arg: *AST,
@@ -56,6 +62,11 @@ pub const AST = union(enum) {
                 op.left.deinit(allocator);
                 op.right.deinit(allocator);
             },
+            .ifExpr => |ifExpr| {
+                ifExpr.predicate.deinit(allocator);
+                ifExpr.thenExpr.deinit(allocator);
+                ifExpr.elseExpr.deinit(allocator);
+            },
             else => {},
         }
         allocator.destroy(self);
@@ -63,6 +74,15 @@ pub const AST = union(enum) {
 
     pub fn print(self: AST, writer: std.io.AnyWriter) !void {
         switch (self) {
+            .ifExpr => |ifExpr| {
+                try writer.print("If(predicate: ", .{});
+                try ifExpr.predicate.print(writer);
+                try writer.print(", then: ", .{});
+                try ifExpr.thenExpr.print(writer);
+                try writer.print(", else: ", .{});
+                try ifExpr.elseExpr.print(writer);
+                try writer.print(")", .{});
+            },
             .let => |let| {
                 try writer.print("Let(name: {s}, be: ", .{let.name.lexeme});
                 try let.be.print(writer);

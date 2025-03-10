@@ -15,6 +15,9 @@ const identifierMap =
         .{ "in", .In },
         .{ "True", .BoolLiteral },
         .{ "False", .BoolLiteral },
+        .{ "if", .If },
+        .{ "then", .Then },
+        .{ "else", .Else },
     });
 
 pub const Lexer = struct {
