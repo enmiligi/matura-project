@@ -1,1 +1,1 @@
-let f = lambda x. f + 2 in f 3
+let f = lambda x. f x in f 3

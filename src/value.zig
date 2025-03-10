@@ -20,6 +20,13 @@ pub fn printValue(value: Value, writer: std.io.AnyWriter) !void {
                 .closure => {
                     try writer.print("Closure", .{});
                 },
+                .recurse => |rec| {
+                    if (rec) |recurseVal| {
+                        try printValue(recurseVal, writer);
+                    } else {
+                        try writer.print("Value used before defined", .{});
+                    }
+                },
             }
         },
     }

@@ -9,7 +9,7 @@ const EvalError = error{
 
     // This should never happen because of the type inference/checking
     UnexpectedType,
-};
+} || std.mem.Allocator.Error;
 
 pub const Env = struct {
     contents: std.StringHashMap(Value),
@@ -135,7 +135,49 @@ pub const Interpreter = struct {
         }
     }
 
-    pub fn eval(self: *Interpreter, ast: *AST) !Value {
+    fn evalClosure(self: *Interpreter, function: *Value, clos: *object.Closure, arg: *AST) EvalError!Value {
+        try self.pushValue(function);
+        const argument = try self.eval(arg);
+        var copiedEnv = try clos.bound.clone();
+        defer copiedEnv.deinit();
+        try copiedEnv.put(clos.argName.lexeme, argument);
+        self.popValue();
+        try self.pushEnv(copiedEnv);
+        defer self.popEnv();
+        return self.eval(clos.code);
+    }
+
+    fn evalCall(self: *Interpreter, function: Value, arg: *AST) !Value {
+        switch (function) {
+            .object => |obj| {
+                switch (obj.content) {
+                    .closure => |closure| {
+                        try self.pushValue(function);
+                        const argument = try self.eval(arg);
+                        var copiedEnv = try closure.bound.clone();
+                        defer copiedEnv.deinit();
+                        try copiedEnv.put(closure.argName.lexeme, argument);
+                        self.popValue();
+                        try self.pushEnv(copiedEnv);
+                        defer self.popEnv();
+                        return self.eval(closure.code);
+                    },
+                    .recurse => |rec| {
+                        if (rec) |recVal| {
+                            return self.evalCall(recVal, arg);
+                        } else {
+                            return error.UnknownIdentifier;
+                        }
+                    },
+                }
+            },
+            else => {
+                return error.UnexpectedType;
+            },
+        }
+    }
+
+    pub fn eval(self: *Interpreter, ast: *AST) EvalError!Value {
         switch (ast.*) {
             .intConstant => |intC| {
                 return .{ .int = intC.value };
@@ -144,14 +186,35 @@ pub const Interpreter = struct {
                 return .{ .float = floatC.value };
             },
             .identifier => |id| {
+                const value = self.lookup(id.token.lexeme);
+                if (value) |val| {
+                    switch (val) {
+                        .object => |obj| {
+                            switch (obj.content) {
+                                .recurse => |rec| {
+                                    if (rec) |recVal| {
+                                        return recVal;
+                                    } else {
+                                        return error.UnknownIdentifier;
+                                    }
+                                },
+                                else => {},
+                            }
+                        },
+                        else => {},
+                    }
+                }
                 return self.lookup(id.token.lexeme) orelse error.UnknownIdentifier;
             },
             .let => |let| {
-                const valOfVar = try self.eval(let.be);
                 const prev = self.lookup(let.name.lexeme);
                 if (prev) |prevV| {
                     try self.pushValue(prevV);
                 }
+                const recursionPointer = try self.objects.makeRecurse();
+                try self.set(let.name.lexeme, .{ .object = recursionPointer });
+                const valOfVar = try self.eval(let.be);
+                recursionPointer.content.recurse = valOfVar;
                 try self.set(let.name.lexeme, valOfVar);
                 const result = try self.eval(let.in);
                 if (prev) |prevValue| {
@@ -164,26 +227,7 @@ pub const Interpreter = struct {
             },
             .call => |call| {
                 const function = try self.eval(call.function);
-                switch (function) {
-                    .object => |obj| {
-                        switch (obj.content) {
-                            .closure => |closure| {
-                                try self.pushValue(function);
-                                const arg = try self.eval(call.arg);
-                                var copiedEnv = try closure.bound.clone();
-                                defer copiedEnv.deinit();
-                                try copiedEnv.put(closure.argName.lexeme, arg);
-                                self.popValue();
-                                try self.pushEnv(copiedEnv);
-                                defer self.popEnv();
-                                return self.eval(closure.code);
-                            },
-                        }
-                    },
-                    else => {
-                        return error.UnexpectedType;
-                    },
-                }
+                return self.evalCall(function, call.arg);
             },
             .lambda => |lambda| {
                 const boundEnv = try self.currentEnv.contents.clone();

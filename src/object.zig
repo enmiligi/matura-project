@@ -12,6 +12,7 @@ pub const Closure = struct {
 
 pub const ObjectContent = union(enum) {
     closure: Closure,
+    recurse: ?Value,
 };
 
 const GCStressTest: bool = true;
@@ -27,6 +28,16 @@ pub const Object = struct {
             .closure => |*clos| {
                 clos.bound.deinit();
             },
+            .recurse => |rec| {
+                if (rec) |recV| {
+                    switch (recV) {
+                        .object => |obj| {
+                            obj.deinit(allocator);
+                        },
+                        else => {},
+                    }
+                }
+            },
         }
         allocator.destroy(self);
     }
@@ -34,6 +45,7 @@ pub const Object = struct {
     pub fn getType(self: *Object) []const u8 {
         return switch (self.content) {
             .closure => "Closure",
+            .recurse => "Recurse",
         };
     }
 };
@@ -68,6 +80,16 @@ pub const Objects = struct {
             switch (obj.content) {
                 .closure => |*clos| {
                     self.markMap(&clos.bound);
+                },
+                .recurse => |rec| {
+                    if (rec) |recValue| {
+                        switch (recValue) {
+                            .object => |recObj| {
+                                self.markObject(recObj);
+                            },
+                            else => {},
+                        }
+                    }
                 },
             }
         }
@@ -158,6 +180,12 @@ pub const Objects = struct {
             .bound = bound,
             .code = code,
         } };
+        return object;
+    }
+
+    pub fn makeRecurse(self: *Objects) !*Object {
+        const object = try self.makeObject();
+        object.content = .{ .recurse = null };
         return object;
     }
 };
