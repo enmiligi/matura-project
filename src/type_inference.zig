@@ -474,33 +474,35 @@ pub const AlgorithmJ = struct {
             },
             .operator => |op| {
                 errdefer self.allocator.destroy(t);
-                const tV = try Type.init(self.allocator);
-                tV.* = self.newVarT();
-                const tNumber = try Type.init(self.allocator);
-                errdefer tNumber.deinit(self.allocator);
-                tNumber.data = .{
-                    .number = .{ .variable = tV },
-                };
                 const leftType = try self.run(typeEnv, op.left);
                 defer leftType.deinit(self.allocator);
-                self.unify(leftType, tNumber) catch |err| switch (err) {
-                    error.CouldNotUnify => {
-                        try self.errors.typeComparison(
-                            op.left,
-                            leftType,
-                            t,
-                            "which should be the same as the type of this",
-                            "it is given as an argument to a numeric operator:",
-                            .{ .start = op.token.start, .end = op.token.end },
-                        );
-                        return err;
-                    },
-                    else => {
-                        return err;
-                    },
-                };
+                if (op.token.lexeme[0] != '=' and op.token.lexeme[0] != '!') {
+                    const tV = try Type.init(self.allocator);
+                    tV.* = self.newVarT();
+                    const tNumber = try Type.init(self.allocator);
+                    defer tNumber.deinit(self.allocator);
+                    tNumber.data = .{
+                        .number = .{ .variable = tV },
+                    };
+                    self.unify(leftType, tNumber) catch |err| switch (err) {
+                        error.CouldNotUnify => {
+                            try self.errors.typeComparison(
+                                op.left,
+                                leftType,
+                                t,
+                                "which should be the same as the type of this",
+                                "it is given as an argument to a numeric operator:",
+                                .{ .start = op.token.start, .end = op.token.end },
+                            );
+                            return err;
+                        },
+                        else => {
+                            return err;
+                        },
+                    };
+                }
                 const rightType = try self.run(typeEnv, op.right);
-                defer rightType.deinit(self.allocator);
+                errdefer rightType.deinit(self.allocator);
                 self.unify(leftType, rightType) catch |err| switch (err) {
                     error.CouldNotUnify => {
                         try self.errors.typeMismatch(
@@ -519,10 +521,10 @@ pub const AlgorithmJ = struct {
                 switch (op.token.lexeme[0]) {
                     '+', '-', '*', '/' => {
                         self.allocator.destroy(t);
-                        return tNumber;
+                        return rightType;
                     },
-                    '<', '>' => {
-                        tNumber.deinit(self.allocator);
+                    '<', '>', '=', '!' => {
+                        rightType.deinit(self.allocator);
                         t.data = .{ .primitive = .Bool };
                     },
                     else => {},

@@ -45,8 +45,10 @@ pub const Lexer = struct {
         } else if (std.ascii.isDigit(c)) {
             return self.numberLiteral();
         } else {
+            if (c == '=' or c == '!') {
+                return self.doubleOperator();
+            }
             const tt: ?token.TokenType = switch (c) {
-                '=' => .Equal,
                 '(' => .LeftParen,
                 ')' => .RightParen,
                 '.' => .Dot,
@@ -88,6 +90,28 @@ pub const Lexer = struct {
         };
         self.tokenStart = self.location;
         return t;
+    }
+
+    fn doubleOperator(self: *Lexer) !token.Token {
+        var tt: token.TokenType = undefined;
+        if (self.getChar() == '=') {
+            self.location += 1;
+            if (self.getChar() == '=') {
+                self.location += 1;
+                tt = .Operator;
+            } else {
+                tt = .Equal;
+            }
+        } else if (self.getChar() == '!') {
+            self.location += 1;
+            if (self.getChar() == '=') {
+                self.location += 1;
+                tt = .Operator;
+            } else {
+                return error.InvalidChar;
+            }
+        }
+        return self.makeToken(tt);
     }
 
     // identifier ::= alpha (alnum|_)*

@@ -143,6 +143,8 @@ pub const Interpreter = struct {
                         const res = switch (op.lexeme[0]) {
                             '<' => int1 < int2,
                             '>' => int1 > int2,
+                            '=' => int1 == int2,
+                            '!' => int1 != int2,
                             else => undefined,
                         };
                         return .{ .bool = res };
@@ -158,6 +160,8 @@ pub const Interpreter = struct {
                         const res = switch (op.lexeme[0]) {
                             '<' => float1 < float2,
                             '>' => float1 > float2,
+                            '=' => float1 == float2,
+                            '!' => float1 != float2,
                             else => undefined,
                         };
                         return .{ .bool = res };
@@ -167,10 +171,58 @@ pub const Interpreter = struct {
                     },
                 }
             },
-            else => {
-                return error.UnexpectedType;
+            .bool => |bool1| {
+                switch (right) {
+                    .bool => |bool2| {
+                        const res = switch (op.lexeme[0]) {
+                            '=' => bool1 == bool2,
+                            '!' => bool1 != bool2,
+                            else => undefined,
+                        };
+                        return .{ .bool = res };
+                    },
+                    else => {
+                        return error.UnexpectedType;
+                    },
+                }
+            },
+            .object => |object1| {
+                switch (object1.content) {
+                    .recurse => |rec1| {
+                        if (rec1) |rec1Value| {
+                            return evalComp(op, rec1Value, right);
+                        } else {
+                            return error.UnknownIdentifier;
+                        }
+                    },
+                    .closure => {
+                        switch (right) {
+                            .object => |object2| {
+                                switch (object2.content) {
+                                    .recurse => |rec2| {
+                                        if (rec2) |rec2Value| {
+                                            return evalComp(op, left, rec2Value);
+                                        } else {
+                                            return error.UnknownIdentifier;
+                                        }
+                                    },
+                                    .closure => {
+                                        const res = switch (op.lexeme[0]) {
+                                            '=' => object1 == object2,
+                                            '!' => object1 != object2,
+                                            else => undefined,
+                                        };
+                                        return .{ .bool = res };
+                                    },
+                                }
+                            },
+                            else => {},
+                        }
+                    },
+                }
             },
         }
+        return error.UnexpectedType;
     }
 
     fn evalClosure(self: *Interpreter, function: *Value, clos: *object.Closure, arg: *AST) EvalError!Value {
@@ -292,7 +344,7 @@ pub const Interpreter = struct {
                     '+', '-', '*', '/' => {
                         return evalNumberOp(op.token, left, right);
                     },
-                    '<', '>' => {
+                    '<', '>', '=', '!' => {
                         return evalComp(op.token, left, right);
                     },
                     else => {
