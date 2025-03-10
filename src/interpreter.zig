@@ -135,6 +135,44 @@ pub const Interpreter = struct {
         }
     }
 
+    fn evalComp(op: token.Token, left: Value, right: Value) !Value {
+        switch (left) {
+            .int => |int1| {
+                switch (right) {
+                    .int => |int2| {
+                        const res = switch (op.lexeme[0]) {
+                            '<' => int1 < int2,
+                            '>' => int1 > int2,
+                            else => undefined,
+                        };
+                        return .{ .bool = res };
+                    },
+                    else => {
+                        return error.UnexpectedType;
+                    },
+                }
+            },
+            .float => |float1| {
+                switch (right) {
+                    .float => |float2| {
+                        const res = switch (op.lexeme[0]) {
+                            '<' => float1 < float2,
+                            '>' => float1 > float2,
+                            else => undefined,
+                        };
+                        return .{ .bool = res };
+                    },
+                    else => {
+                        return error.UnexpectedType;
+                    },
+                }
+            },
+            else => {
+                return error.UnexpectedType;
+            },
+        }
+    }
+
     fn evalClosure(self: *Interpreter, function: *Value, clos: *object.Closure, arg: *AST) EvalError!Value {
         try self.pushValue(function);
         const argument = try self.eval(arg);
@@ -253,6 +291,9 @@ pub const Interpreter = struct {
                 switch (op.token.lexeme[0]) {
                     '+', '-', '*', '/' => {
                         return evalNumberOp(op.token, left, right);
+                    },
+                    '<', '>' => {
+                        return evalComp(op.token, left, right);
                     },
                     else => {
                         return undefined;

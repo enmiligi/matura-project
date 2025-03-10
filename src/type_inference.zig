@@ -473,18 +473,17 @@ pub const AlgorithmJ = struct {
                 t.data = .{ .primitive = .Bool };
             },
             .operator => |op| {
-                const tV = Type.init(self.allocator) catch |err| {
-                    self.allocator.destroy(t);
-                    return err;
-                };
+                errdefer self.allocator.destroy(t);
+                const tV = try Type.init(self.allocator);
                 tV.* = self.newVarT();
-                t.data = .{
+                const tNumber = try Type.init(self.allocator);
+                errdefer tNumber.deinit(self.allocator);
+                tNumber.data = .{
                     .number = .{ .variable = tV },
                 };
-                errdefer t.deinit(self.allocator);
                 const leftType = try self.run(typeEnv, op.left);
                 defer leftType.deinit(self.allocator);
-                self.unify(leftType, t) catch |err| switch (err) {
+                self.unify(leftType, tNumber) catch |err| switch (err) {
                     error.CouldNotUnify => {
                         try self.errors.typeComparison(
                             op.left,
@@ -517,6 +516,17 @@ pub const AlgorithmJ = struct {
                         return err;
                     },
                 };
+                switch (op.token.lexeme[0]) {
+                    '+', '-', '*', '/' => {
+                        self.allocator.destroy(t);
+                        return tNumber;
+                    },
+                    '<', '>' => {
+                        tNumber.deinit(self.allocator);
+                        t.data = .{ .primitive = .Bool };
+                    },
+                    else => {},
+                }
             },
             .ifExpr => |ifExpr| {
                 self.allocator.destroy(t);

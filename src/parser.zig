@@ -226,8 +226,9 @@ pub const Parser = struct {
         errdefer left.deinit(self.allocator);
         const t = try self.getToken();
         const prec: usize = switch (t.lexeme[0]) {
-            '+', '-' => 10,
-            '*', '/' => 20,
+            '<', '>' => 10,
+            '+', '-' => 20,
+            '*', '/' => 30,
             else => undefined,
         };
         const right = try self.expression(prec);
@@ -255,8 +256,9 @@ pub const Parser = struct {
         return switch (self.peekToken().type) {
             .Operator => {
                 const prec: usize = switch (self.peekToken().lexeme[0]) {
-                    '+', '-' => 10,
-                    '*', '/' => 20,
+                    '<', '>' => 10,
+                    '+', '-' => 20,
+                    '*', '/' => 30,
                     else => undefined,
                 };
                 return .{ operator, prec };
