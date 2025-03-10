@@ -47,6 +47,9 @@ pub const Errors = struct {
             .floatConstant => |fC| {
                 return .{ .start = fC.token.start, .end = fC.token.end };
             },
+            .boolConstant => |bC| {
+                return .{ .start = bC.token.start, .end = bC.token.end };
+            },
             .lambda => |lambda| {
                 const end = computeBoundaries(lambda.expr).end;
                 return .{ .start = lambda.start, .end = end };
@@ -190,6 +193,10 @@ pub const Errors = struct {
                                             try self.printType(leftType, leftWriter, currentTypeVar, false);
                                             try self.printType(rightType, rightWriter, currentTypeVar, false);
                                         },
+                                        .Bool => {
+                                            try self.printType(leftType, leftWriter, currentTypeVar, true);
+                                            try self.printType(rightType, rightWriter, currentTypeVar, true);
+                                        },
                                     }
                                 }
                             },
@@ -259,6 +266,10 @@ pub const Errors = struct {
                                         .Int, .Float => {
                                             try self.printType(leftType, leftWriter, currentTypeVar, false);
                                             try self.printType(rightType, rightWriter, currentTypeVar, false);
+                                        },
+                                        .Bool => {
+                                            try self.printType(leftType, leftWriter, currentTypeVar, true);
+                                            try self.printType(rightType, rightWriter, currentTypeVar, true);
                                         },
                                     }
                                 },

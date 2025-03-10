@@ -102,6 +102,16 @@ pub const Parser = struct {
         return ast;
     }
 
+    fn boolLiteral(self: *Parser) !*AST {
+        const t = try self.getToken();
+        const ast = try self.allocator.create(AST);
+        ast.* = .{ .boolConstant = .{
+            .token = t,
+            .value = std.mem.eql(u8, t.lexeme, "True"),
+        } };
+        return ast;
+    }
+
     // identifier ::= Identifier
     fn identifier(self: *Parser) !*AST {
         const t = try self.getToken();
@@ -176,6 +186,7 @@ pub const Parser = struct {
         return switch (self.peekToken().type) {
             token.TokenType.IntLiteral => intLiteral,
             token.TokenType.FloatLiteral => floatLiteral,
+            token.TokenType.BoolLiteral => boolLiteral,
             token.TokenType.LeftParen => brackets,
             token.TokenType.Identifier => identifier,
             token.TokenType.Let => let,

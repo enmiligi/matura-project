@@ -179,6 +179,9 @@ pub const Interpreter = struct {
 
     pub fn eval(self: *Interpreter, ast: *AST) EvalError!Value {
         switch (ast.*) {
+            .boolConstant => |boolC| {
+                return .{ .bool = boolC.value };
+            },
             .intConstant => |intC| {
                 return .{ .int = intC.value };
             },

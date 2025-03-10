@@ -13,6 +13,7 @@ pub const TokenType = enum {
     // literals
     FloatLiteral,
     IntLiteral,
+    BoolLiteral,
     // user-defined
     Identifier,
     // End of File
@@ -33,6 +34,7 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .RightParen => "')'",
         .EOF => "the end of the file",
         .Operator => "an operator",
+        .BoolLiteral => "a boolean value",
     };
     return name;
 }

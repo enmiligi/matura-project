@@ -25,6 +25,10 @@ pub const AST = union(enum) {
         token: token.Token,
         value: f64,
     },
+    boolConstant: struct {
+        token: token.Token,
+        value: bool,
+    },
     identifier: struct {
         token: token.Token,
     },
@@ -83,6 +87,9 @@ pub const AST = union(enum) {
             },
             .floatConstant => |float| {
                 try writer.print("Float({s})", .{float.token.lexeme});
+            },
+            .boolConstant => |boolConst| {
+                try writer.print("Bool({s})", .{boolConst.token.lexeme});
             },
             .identifier => |id| {
                 try writer.print("Identifier({s})", .{id.token.lexeme});

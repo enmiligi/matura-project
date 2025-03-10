@@ -3,7 +3,7 @@ const AST = @import("./ast.zig").AST;
 const Errors = @import("./errors.zig").Errors;
 const computeBoundaries = @import("./errors.zig").Errors.computeBoundaries;
 
-const PrimitiveType = enum { Int, Float };
+const PrimitiveType = enum { Int, Float, Bool };
 
 pub const Number = struct {
     variable: *Type,
@@ -89,6 +89,9 @@ pub fn printType(t: *Type, writer: std.io.AnyWriter, currentTypeVar: *usize, typ
                 },
                 .Float => {
                     try writer.print("Float", .{});
+                },
+                .Bool => {
+                    try writer.print("Bool", .{});
                 },
             }
         },
@@ -264,6 +267,9 @@ pub const AlgorithmJ = struct {
                             .Int, .Float => {
                                 try self.unify(numB.variable, typeA);
                             },
+                            .Bool => {
+                                return error.CouldNotUnify;
+                            },
                         }
                     },
                 }
@@ -295,6 +301,9 @@ pub const AlgorithmJ = struct {
                         switch (prim) {
                             .Int, .Float => {
                                 try self.unify(numA.variable, typeB);
+                            },
+                            .Bool => {
+                                return error.CouldNotUnify;
                             },
                         }
                     },
@@ -459,6 +468,9 @@ pub const AlgorithmJ = struct {
             },
             .floatConstant => |_| {
                 t.data = .{ .primitive = .Float };
+            },
+            .boolConstant => |_| {
+                t.data = .{ .primitive = .Bool };
             },
             .operator => |op| {
                 const tV = Type.init(self.allocator) catch |err| {

@@ -28,16 +28,7 @@ pub const Object = struct {
             .closure => |*clos| {
                 clos.bound.deinit();
             },
-            .recurse => |rec| {
-                if (rec) |recV| {
-                    switch (recV) {
-                        .object => |obj| {
-                            obj.deinit(allocator);
-                        },
-                        else => {},
-                    }
-                }
-            },
+            else => {},
         }
         allocator.destroy(self);
     }

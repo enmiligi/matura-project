@@ -9,7 +9,13 @@ const LexerError = error{
 // map special identifiers to keyword TokenType
 const identifierMap =
     std.StaticStringMap(token.TokenType)
-        .initComptime(.{ .{ "let", .Let }, .{ "lambda", .Lambda }, .{ "in", .In } });
+        .initComptime(.{
+        .{ "let", .Let },
+        .{ "lambda", .Lambda },
+        .{ "in", .In },
+        .{ "True", .BoolLiteral },
+        .{ "False", .BoolLiteral },
+    });
 
 pub const Lexer = struct {
     source: []const u8,

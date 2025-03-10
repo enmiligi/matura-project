@@ -4,6 +4,7 @@ const std = @import("std");
 pub const Value = union(enum) {
     int: i64,
     float: f64,
+    bool: bool,
     object: *object.Object,
 };
 
@@ -14,6 +15,13 @@ pub fn printValue(value: Value, writer: std.io.AnyWriter) !void {
         },
         .int => |i| {
             try writer.print("{d}", .{i});
+        },
+        .bool => |b| {
+            if (b) {
+                try writer.print("True", .{});
+            } else {
+                try writer.print("False", .{});
+            }
         },
         .object => |obj| {
             switch (obj.content) {
