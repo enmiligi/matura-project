@@ -1,8 +1,10 @@
 let fibonacci =
     lambda x.
-        if x < 2 then
-            1
-        else
-            fibonacci (x - 1) +
-            fibonacci (x - 2)
-    in fibonacci 7
+        let fibonacciHelper =
+            lambda prev. lambda current. lambda n.
+                if n == x then
+                    current
+                else
+                    fibonacciHelper current (prev + current) (n + 1)
+        in fibonacciHelper 0 1 0
+    in fibonacci 50
