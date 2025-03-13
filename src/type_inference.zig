@@ -472,6 +472,35 @@ pub const AlgorithmJ = struct {
             .boolConstant => |_| {
                 t.data = .{ .primitive = .Bool };
             },
+            .prefixOp => |prefixOp| {
+                const char = prefixOp.token.lexeme[0];
+                if (char == '-') {
+                    const tV = try Type.init(self.allocator);
+                    tV.* = self.newVarT();
+                    t.data = .{ .number = .{ .variable = tV } };
+                } else {
+                    t.data = .{ .primitive = .Bool };
+                }
+                errdefer t.deinit(self.allocator);
+                const typeOfExpr = try self.run(typeEnv, prefixOp.expr);
+                defer typeOfExpr.deinit(self.allocator);
+                self.unify(typeOfExpr, t) catch |err| switch (err) {
+                    error.CouldNotUnify => {
+                        try self.errors.typeComparison(
+                            prefixOp.expr,
+                            typeOfExpr,
+                            t,
+                            "which should be the same as the type of this",
+                            "it is given as an argument to a prefix operator:",
+                            .{ .start = prefixOp.token.start, .end = prefixOp.token.end },
+                        );
+                        return err;
+                    },
+                    else => {
+                        return err;
+                    },
+                };
+            },
             .operator => |op| {
                 errdefer self.allocator.destroy(t);
                 const leftType = try self.run(typeEnv, op.left);
@@ -479,7 +508,10 @@ pub const AlgorithmJ = struct {
                 if (op.token.lexeme[0] != '=' and op.token.lexeme[0] != '!') {
                     const tV = try Type.init(self.allocator);
                     tV.* = self.newVarT();
-                    const tNumber = try Type.init(self.allocator);
+                    const tNumber = Type.init(self.allocator) catch |err| {
+                        tV.deinit(self.allocator);
+                        return err;
+                    };
                     defer tNumber.deinit(self.allocator);
                     tNumber.data = .{
                         .number = .{ .variable = tV },

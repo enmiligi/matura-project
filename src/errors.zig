@@ -75,6 +75,12 @@ pub const Errors = struct {
                 const end = computeBoundaries(op.right).end;
                 return .{ .start = start, .end = end };
             },
+            .prefixOp => |prefixOp| {
+                return .{
+                    .start = prefixOp.token.start,
+                    .end = computeBoundaries(prefixOp.expr).end,
+                };
+            },
         }
     }
 

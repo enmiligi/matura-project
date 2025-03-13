@@ -43,6 +43,10 @@ pub const AST = union(enum) {
         left: *AST,
         right: *AST,
     },
+    prefixOp: struct {
+        token: token.Token,
+        expr: *AST,
+    },
 
     // Recursively destroy all contained ASTs
     pub fn deinit(self: *AST, allocator: std.mem.Allocator) void {
@@ -66,6 +70,9 @@ pub const AST = union(enum) {
                 ifExpr.predicate.deinit(allocator);
                 ifExpr.thenExpr.deinit(allocator);
                 ifExpr.elseExpr.deinit(allocator);
+            },
+            .prefixOp => |prefixOp| {
+                prefixOp.expr.deinit(allocator);
             },
             else => {},
         }
@@ -119,6 +126,11 @@ pub const AST = union(enum) {
                 try op.left.print(writer);
                 try writer.print("{s}", .{op.token.lexeme});
                 try op.right.print(writer);
+                try writer.print(")", .{});
+            },
+            .prefixOp => |prefixOp| {
+                try writer.print("({s}", .{prefixOp.token.lexeme});
+                try prefixOp.expr.print(writer);
                 try writer.print(")", .{});
             },
         }

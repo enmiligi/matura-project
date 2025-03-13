@@ -352,6 +352,31 @@ pub const Interpreter = struct {
                     },
                 }
             },
+            .prefixOp => |prefixOp| {
+                switch (prefixOp.token.lexeme[0]) {
+                    '!' => {
+                        const exprResult = try self.eval(prefixOp.expr);
+                        return .{ .bool = !exprResult.bool };
+                    },
+                    '-' => {
+                        const exprResult = try self.eval(prefixOp.expr);
+                        switch (exprResult) {
+                            .int => |int| {
+                                return .{ .int = -int };
+                            },
+                            .float => |f| {
+                                return .{ .float = -f };
+                            },
+                            else => {
+                                return error.UnexpectedType;
+                            },
+                        }
+                    },
+                    else => {
+                        return error.UnexpectedType;
+                    },
+                }
+            },
         }
     }
 };

@@ -207,6 +207,20 @@ pub const Parser = struct {
         return ifAST;
     }
 
+    fn prefixOp(self: *Parser) !*AST {
+        const t = try self.getToken();
+        const prec: usize = switch (t.lexeme[0]) {
+            '-' => 10,
+            '!' => 0,
+            else => undefined,
+        };
+        const expr = try self.expression(prec);
+        errdefer expr.deinit(self.allocator);
+        const prefixOpAST = try self.allocator.create(AST);
+        prefixOpAST.* = .{ .prefixOp = .{ .token = t, .expr = expr } };
+        return prefixOpAST;
+    }
+
     // Get rule in prefix position
     fn getNud(self: *Parser) ?PrefixParseFn {
         return switch (self.peekToken().type) {
@@ -218,6 +232,14 @@ pub const Parser = struct {
             token.TokenType.Let => let,
             token.TokenType.Lambda => lambda,
             token.TokenType.If => ifExpr,
+            token.TokenType.Operator => {
+                if (self.peekToken().lexeme.len == 1 and
+                    (self.peekToken().lexeme[0] == '-' or self.peekToken().lexeme[0] == '!'))
+                {
+                    return prefixOp;
+                }
+                return null;
+            },
             else => null,
         };
     }
@@ -255,6 +277,9 @@ pub const Parser = struct {
     fn getLed(self: *Parser) ?InfixParseRule {
         return switch (self.peekToken().type) {
             .Operator => {
+                if (self.peekToken().lexeme.len == 1 and self.peekToken().lexeme[0] == '!') {
+                    return .{ call, std.math.maxInt(Precedence) };
+                }
                 const prec: usize = switch (self.peekToken().lexeme[0]) {
                     '<', '>', '=', '!' => 10,
                     '+', '-' => 20,

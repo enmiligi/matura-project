@@ -108,7 +108,7 @@ pub const Lexer = struct {
                 self.location += 1;
                 tt = .Operator;
             } else {
-                return error.InvalidChar;
+                tt = .Operator;
             }
         }
         return self.makeToken(tt);
