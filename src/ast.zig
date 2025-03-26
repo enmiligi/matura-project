@@ -12,6 +12,7 @@ pub const AST = union(enum) {
         start: usize,
         argname: token.Token,
         expr: *AST,
+        encloses: ?std.ArrayList([]const u8) = null,
     },
     ifExpr: struct {
         start: usize,
@@ -57,6 +58,9 @@ pub const AST = union(enum) {
             },
             .lambda => |lambda| {
                 lambda.expr.deinit(allocator);
+                if (lambda.encloses) |encloses| {
+                    encloses.deinit();
+                }
             },
             .call => |call| {
                 call.function.deinit(allocator);

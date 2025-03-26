@@ -7,4 +7,4 @@ let fibonacci =
                 else
                     fibonacciHelper current (prev + current) (n + 1)
         in fibonacciHelper 0 1 0
-    in fibonacci 50
+    in fibonacci 20

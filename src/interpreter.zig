@@ -82,7 +82,14 @@ pub const Interpreter = struct {
     }
 
     inline fn lookup(self: *Interpreter, name: []const u8) ?Value {
-        return self.currentEnv.contents.get(name);
+        var env = self.currentEnv;
+        while (!env.contents.contains(name)) {
+            if (env.next) |nextEnv| {
+                env = nextEnv;
+            }
+            return null;
+        }
+        return env.contents.get(name);
     }
 
     inline fn set(self: *Interpreter, name: []const u8, val: Value) !void {
@@ -331,6 +338,13 @@ pub const Interpreter = struct {
                 return self.evalCall(function, call.arg);
             },
             .lambda => |lambda| {
+                // var boundEnv = std.StringHashMap(Value).init(self.allocator);
+                // errdefer boundEnv.deinit();
+                // const enclosed = lambda.encloses.?.items;
+                // var i: usize = 0;
+                // while (i < enclosed.len) : (i += 1) {
+                //     try boundEnv.put(enclosed[i], self.lookup(enclosed[i]).?);
+                // }
                 const boundEnv = try self.currentEnv.contents.clone();
                 const closure = try self.objects.makeClosure(lambda.argname, boundEnv, lambda.expr);
                 return .{ .object = closure };

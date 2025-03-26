@@ -8,6 +8,7 @@ pub const type_inference = @import("./type_inference.zig");
 pub const interpreter = @import("./interpreter.zig");
 pub const value = @import("./value.zig");
 pub const errors = @import("./errors.zig");
+pub const optimizer = @import("./optimizer.zig");
 
 const MainError = error{
     WrongUsage,
@@ -85,6 +86,7 @@ pub fn main() !u8 {
     try fileAst.print(stdout.any());
 
     try stdout.print("\n", .{});
+    try bw.flush();
 
     var algorithmJ = type_inference.AlgorithmJ.init(allocator, &errs);
 
@@ -98,6 +100,8 @@ pub fn main() !u8 {
         },
     };
     defer t.deinit(allocator);
+
+    try optimizer.OptimizeClosures.run(fileAst, allocator);
 
     var interpreter_ = try interpreter.Interpreter.init(allocator);
     defer interpreter_.deinit();
