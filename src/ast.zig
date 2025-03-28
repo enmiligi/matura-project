@@ -130,10 +130,10 @@ pub const AST = union(enum) {
             },
             .lambdaMult => |lambdaMult| {
                 try writer.print("LambdaMult(args: [", .{});
-                var i: usize = 0;
-                while (i < lambdaMult.argnames.items.len) : (i += 1) {
-                    try writer.print("{s}", .{lambdaMult.argnames.items[i].lexeme});
-                    if (i != lambdaMult.argnames.items.len - 1) {
+                var i: usize = lambdaMult.argnames.items.len;
+                while (i > 0) : (i -= 1) {
+                    try writer.print("{s}", .{lambdaMult.argnames.items[i - 1].lexeme});
+                    if (i != 1) {
                         try writer.print(", ", .{});
                     }
                 }
@@ -145,10 +145,10 @@ pub const AST = union(enum) {
                 try writer.print("CallMult(function: ", .{});
                 try callMult.function.print(writer);
                 try writer.print(", args: [", .{});
-                var i: usize = 0;
-                while (i < callMult.args.items.len) : (i += 1) {
-                    try callMult.args.items[i].print(writer);
-                    if (i != callMult.args.items.len - 1) {
+                var i: usize = callMult.args.items.len;
+                while (i > 0) : (i -= 1) {
+                    try callMult.args.items[i - 1].print(writer);
+                    if (i != 1) {
                         try writer.print(", ", .{});
                     }
                 }

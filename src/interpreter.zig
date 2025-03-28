@@ -297,7 +297,7 @@ pub const Interpreter = struct {
                         const argument = try self.eval(arg);
                         var copiedEnv = try multiClos.bound.clone();
                         errdefer copiedEnv.deinit();
-                        try copiedEnv.put(multiClos.argNames.items[0].lexeme, argument);
+                        try copiedEnv.put(multiClos.argNames.items[multiClos.argNames.items.len - 1].lexeme, argument);
                         self.popValue();
                         if (multiClos.argNames.items.len == 1) {
                             try self.pushEnv(copiedEnv);
@@ -309,14 +309,14 @@ pub const Interpreter = struct {
                             if (multiClos.argNames.items.len == 2) {
                                 return .{
                                     .object = try self.objects.makeClosure(
-                                        multiClos.argNames.items[1],
+                                        multiClos.argNames.items[0],
                                         multiClos.bound,
                                         multiClos.code,
                                     ),
                                 };
                             }
                             var copiedArgs = try multiClos.argNames.clone();
-                            _ = copiedArgs.orderedRemove(0);
+                            _ = copiedArgs.pop();
                             return .{
                                 .object = try self.objects.makeMultiArgClosure(copiedArgs, copiedEnv, multiClos.code),
                             };
@@ -336,7 +336,7 @@ pub const Interpreter = struct {
                 switch (obj.content) {
                     .closure => |closure| {
                         try self.pushValue(function);
-                        const argument = try self.eval(args.items[0]);
+                        const argument = try self.eval(args.items[args.items.len - 1]);
                         var copiedEnv = try closure.bound.clone();
                         defer copiedEnv.deinit();
                         try copiedEnv.put(closure.argName.lexeme, argument);
@@ -347,11 +347,11 @@ pub const Interpreter = struct {
                         if (args.items.len == 1) {
                             return result;
                         } else if (args.items.len == 2) {
-                            return self.evalCall(result, args.items[1]);
+                            return self.evalCall(result, args.items[0]);
                         } else {
                             var copiedArgs = try args.clone();
                             defer copiedArgs.deinit();
-                            _ = copiedArgs.orderedRemove(0);
+                            _ = copiedArgs.pop();
                             return self.evalCallMult(result, &copiedArgs);
                         }
                     },
@@ -370,10 +370,10 @@ pub const Interpreter = struct {
                         var i: usize = 0;
                         while (i < multiClos.argNames.items.len) : (i += 1) {
                             if (i < args.items.len) {
-                                const argument = args.items[i];
+                                const argument = args.items[args.items.len - i - 1];
                                 const arg = try self.eval(argument);
                                 try self.pushValue(arg);
-                                try copiedEnv.put(multiClos.argNames.items[i].lexeme, arg);
+                                try copiedEnv.put(multiClos.argNames.items[multiClos.argNames.items.len - i - 1].lexeme, arg);
                             }
                         }
                         i = 0;
@@ -393,7 +393,7 @@ pub const Interpreter = struct {
                                 defer copiedArgs.deinit();
                                 i = 0;
                                 while (i < numArgs) : (i += 1) {
-                                    _ = copiedArgs.orderedRemove(0);
+                                    _ = copiedArgs.pop();
                                 }
                                 return self.evalCallMult(result, &copiedArgs);
                             }
@@ -403,7 +403,7 @@ pub const Interpreter = struct {
                             errdefer copiedArgs.deinit();
                             i = 0;
                             while (i < numArgs) : (i += 1) {
-                                _ = copiedArgs.orderedRemove(0);
+                                _ = copiedArgs.pop();
                             }
                             return .{ .object = try self.objects.makeMultiArgClosure(
                                 copiedArgs,

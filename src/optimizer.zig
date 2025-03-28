@@ -89,76 +89,76 @@ pub const OptimizeClosures = struct {
 };
 
 pub const OptimizeFullyInstantiatedCalls = struct {
-    fn combineLambdas(ast: *AST, allocator: std.mem.Allocator) !void {
+    fn combineCalls(ast: *AST, allocator: std.mem.Allocator) !void {
         errdefer ast.* = .{ .boolConstant = .{
             .token = .{ .type = .BoolLiteral, .start = 0, .end = 0, .lexeme = "" },
             .value = true,
         } };
         var currentExpr = ast;
-        var isLambda = true;
-        var arguments = std.ArrayList(token.Token).init(allocator);
-        while (isLambda) {
+        var isCall = true;
+        var arguments = std.ArrayList(*AST).init(allocator);
+        while (isCall) {
             errdefer currentExpr.deinit(allocator);
-            try arguments.append(currentExpr.lambda.argname);
-            currentExpr = currentExpr.lambda.expr;
+            try arguments.append(currentExpr.call.arg);
+            currentExpr = currentExpr.call.function;
             switch (currentExpr.*) {
-                .lambda => {
-                    isLambda = true;
+                .call => {
+                    isCall = true;
                 },
                 else => {
-                    isLambda = false;
+                    isCall = false;
                 },
             }
         }
         const innerExpr = currentExpr;
-        currentExpr = ast.lambda.expr;
-        isLambda = true;
-        while (isLambda) {
+        currentExpr = ast.call.function;
+        isCall = true;
+        while (isCall) {
             const prev = currentExpr;
-            currentExpr = currentExpr.lambda.expr;
-            prev.lambda.encloses.?.deinit();
+            currentExpr = currentExpr.call.function;
             allocator.destroy(prev);
             switch (currentExpr.*) {
-                .lambda => {
-                    isLambda = true;
+                .call => {
+                    isCall = true;
                 },
                 else => {
-                    isLambda = false;
+                    isCall = false;
                 },
             }
         }
-        ast.* = .{ .lambdaMult = .{
-            .argnames = arguments,
-            .start = ast.lambda.start,
-            .expr = innerExpr,
-            .encloses = ast.lambda.encloses.?,
+        ast.* = .{ .callMult = .{
+            .args = arguments,
+            .function = innerExpr,
         } };
     }
 
-    fn combineCalls(ast: *AST, allocator: std.mem.Allocator) !*AST {
+    fn combineLambdas(ast: *AST, allocator: std.mem.Allocator) !void {
         errdefer ast.* = .{ .boolConstant = .{
             .token = .{ .type = .BoolLiteral, .start = 0, .end = 0, .lexeme = "" },
             .value = true,
         } };
-        var arguments: std.ArrayList(*AST) = undefined;
-        var fun: *AST = undefined;
-        switch (ast.call.function.*) {
-            .call => {
-                fun = try combineCalls(ast.call.function, allocator);
-                arguments = ast.call.function.callMult.args;
-                allocator.destroy(ast.call.function);
+        var arguments: std.ArrayList(token.Token) = undefined;
+        var expr: *AST = undefined;
+        switch (ast.lambda.expr.*) {
+            .lambda => {
+                try combineLambdas(ast.lambda.expr, allocator);
+                arguments = ast.lambda.expr.lambdaMult.argnames;
+                expr = ast.lambda.expr.lambdaMult.expr;
+                ast.lambda.expr.lambdaMult.encloses.deinit();
+                allocator.destroy(ast.lambda.expr);
             },
             else => {
                 arguments = .init(allocator);
-                fun = ast.call.function;
+                expr = ast.lambda.expr;
             },
         }
-        try arguments.append(ast.call.arg);
-        ast.* = .{ .callMult = .{
-            .function = fun,
-            .args = arguments,
+        try arguments.append(ast.lambda.argname);
+        ast.* = .{ .lambdaMult = .{
+            .start = ast.lambda.start,
+            .expr = expr,
+            .encloses = ast.lambda.encloses.?,
+            .argnames = arguments,
         } };
-        return fun;
     }
 
     pub fn run(ast: *AST, allocator: std.mem.Allocator) !void {
@@ -176,7 +176,7 @@ pub const OptimizeFullyInstantiatedCalls = struct {
             .call => |call| {
                 switch (call.function.*) {
                     .call => {
-                        _ = try combineCalls(ast, allocator);
+                        try combineCalls(ast, allocator);
                         try run(ast.callMult.function, allocator);
                     },
                     else => {
