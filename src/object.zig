@@ -10,8 +10,15 @@ pub const Closure = struct {
     code: *AST,
 };
 
+pub const MultiArgClosure = struct {
+    argNames: std.ArrayList(token.Token),
+    bound: std.StringHashMap(Value),
+    code: *AST,
+};
+
 pub const ObjectContent = union(enum) {
     closure: Closure,
+    multiArgClosure: MultiArgClosure,
     recurse: ?Value,
 };
 
@@ -28,6 +35,10 @@ pub const Object = struct {
             .closure => |*clos| {
                 clos.bound.deinit();
             },
+            .multiArgClosure => |*multiClos| {
+                multiClos.bound.deinit();
+                multiClos.argNames.deinit();
+            },
             else => {},
         }
         allocator.destroy(self);
@@ -36,6 +47,7 @@ pub const Object = struct {
     pub fn getType(self: *Object) []const u8 {
         return switch (self.content) {
             .closure => "Closure",
+            .multiArgClosure => "MultiArgumentClosure",
             .recurse => "Recurse",
         };
     }
@@ -71,6 +83,9 @@ pub const Objects = struct {
             switch (obj.content) {
                 .closure => |*clos| {
                     self.markMap(&clos.bound);
+                },
+                .multiArgClosure => |*multiClos| {
+                    self.markMap(&multiClos.bound);
                 },
                 .recurse => |rec| {
                     if (rec) |recValue| {
@@ -168,6 +183,16 @@ pub const Objects = struct {
         const object = try self.makeObject();
         object.content = .{ .closure = .{
             .argName = argName,
+            .bound = bound,
+            .code = code,
+        } };
+        return object;
+    }
+
+    pub fn makeMultiArgClosure(self: *Objects, argNames: std.ArrayList(token.Token), bound: std.StringHashMap(Value), code: *AST) !*Object {
+        const object = try self.makeObject();
+        object.content = .{ .multiArgClosure = .{
+            .argNames = argNames,
             .bound = bound,
             .code = code,
         } };

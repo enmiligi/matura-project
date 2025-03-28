@@ -83,10 +83,6 @@ pub fn main() !u8 {
         },
     };
     defer fileAst.deinit(allocator);
-    try fileAst.print(stdout.any());
-
-    try stdout.print("\n", .{});
-    try bw.flush();
 
     var algorithmJ = type_inference.AlgorithmJ.init(allocator, &errs);
 
@@ -102,6 +98,11 @@ pub fn main() !u8 {
     defer t.deinit(allocator);
 
     try optimizer.OptimizeClosures.run(fileAst, allocator);
+    try optimizer.OptimizeFullyInstantiatedCalls.run(fileAst, allocator);
+
+    try fileAst.print(stdout.any());
+    try stdout.print("\n", .{});
+    try bw.flush();
 
     var interpreter_ = try interpreter.Interpreter.init(allocator);
     defer interpreter_.deinit();

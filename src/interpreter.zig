@@ -221,6 +221,32 @@ pub const Interpreter = struct {
                                         };
                                         return .{ .bool = res };
                                     },
+                                    else => {},
+                                }
+                            },
+                            else => {},
+                        }
+                    },
+                    .multiArgClosure => {
+                        switch (right) {
+                            .object => |object2| {
+                                switch (object2.content) {
+                                    .recurse => |rec2| {
+                                        if (rec2) |rec2Value| {
+                                            return evalComp(op, left, rec2Value);
+                                        } else {
+                                            return error.UnknownIdentifier;
+                                        }
+                                    },
+                                    .multiArgClosure => {
+                                        const res = switch (op.lexeme[0]) {
+                                            '=' => object1 == object2,
+                                            '!' => object1 != object2,
+                                            else => undefined,
+                                        };
+                                        return .{ .bool = res };
+                                    },
+                                    else => {},
                                 }
                             },
                             else => {},
@@ -264,6 +290,126 @@ pub const Interpreter = struct {
                             return self.evalCall(recVal, arg);
                         } else {
                             return error.UnknownIdentifier;
+                        }
+                    },
+                    .multiArgClosure => |multiClos| {
+                        try self.pushValue(function);
+                        const argument = try self.eval(arg);
+                        var copiedEnv = try multiClos.bound.clone();
+                        errdefer copiedEnv.deinit();
+                        try copiedEnv.put(multiClos.argNames.items[0].lexeme, argument);
+                        self.popValue();
+                        if (multiClos.argNames.items.len == 1) {
+                            try self.pushEnv(copiedEnv);
+                            defer self.popEnv();
+                            const result = self.eval(multiClos.code);
+                            copiedEnv.deinit();
+                            return result;
+                        } else {
+                            if (multiClos.argNames.items.len == 2) {
+                                return .{
+                                    .object = try self.objects.makeClosure(
+                                        multiClos.argNames.items[1],
+                                        multiClos.bound,
+                                        multiClos.code,
+                                    ),
+                                };
+                            }
+                            var copiedArgs = try multiClos.argNames.clone();
+                            _ = copiedArgs.orderedRemove(0);
+                            return .{
+                                .object = try self.objects.makeMultiArgClosure(copiedArgs, copiedEnv, multiClos.code),
+                            };
+                        }
+                    },
+                }
+            },
+            else => {
+                return error.UnexpectedType;
+            },
+        }
+    }
+
+    fn evalCallMult(self: *Interpreter, function: Value, args: *std.ArrayList(*AST)) !Value {
+        switch (function) {
+            .object => |obj| {
+                switch (obj.content) {
+                    .closure => |closure| {
+                        try self.pushValue(function);
+                        const argument = try self.eval(args.items[0]);
+                        var copiedEnv = try closure.bound.clone();
+                        defer copiedEnv.deinit();
+                        try copiedEnv.put(closure.argName.lexeme, argument);
+                        self.popValue();
+                        try self.pushEnv(copiedEnv);
+                        defer self.popEnv();
+                        const result = try self.eval(closure.code);
+                        if (args.items.len == 1) {
+                            return result;
+                        } else if (args.items.len == 2) {
+                            return self.evalCall(result, args.items[1]);
+                        } else {
+                            var copiedArgs = try args.clone();
+                            defer copiedArgs.deinit();
+                            _ = copiedArgs.orderedRemove(0);
+                            return self.evalCallMult(result, &copiedArgs);
+                        }
+                    },
+                    .recurse => |rec| {
+                        if (rec) |recVal| {
+                            return self.evalCallMult(recVal, args);
+                        } else {
+                            return error.UnknownIdentifier;
+                        }
+                    },
+                    .multiArgClosure => |multiClos| {
+                        try self.pushValue(function);
+                        var copiedEnv = try multiClos.bound.clone();
+                        const numArgs = args.items.len;
+                        errdefer copiedEnv.deinit();
+                        var i: usize = 0;
+                        while (i < multiClos.argNames.items.len) : (i += 1) {
+                            if (i < args.items.len) {
+                                const argument = args.items[i];
+                                const arg = try self.eval(argument);
+                                try self.pushValue(arg);
+                                try copiedEnv.put(multiClos.argNames.items[i].lexeme, arg);
+                            }
+                        }
+                        i = 0;
+                        while (i < multiClos.argNames.items.len) : (i += 1) {
+                            if (i < args.items.len) {
+                                self.popValue();
+                            }
+                        }
+                        self.popValue();
+                        if (numArgs >= multiClos.argNames.items.len) {
+                            try self.pushEnv(copiedEnv);
+                            defer self.popEnv();
+                            const result = try self.eval(multiClos.code);
+                            copiedEnv.deinit();
+                            if (numArgs > multiClos.argNames.items.len) {
+                                var copiedArgs = try args.clone();
+                                defer copiedArgs.deinit();
+                                i = 0;
+                                while (i < numArgs) : (i += 1) {
+                                    _ = copiedArgs.orderedRemove(0);
+                                }
+                                return self.evalCallMult(result, &copiedArgs);
+                            }
+                            return result;
+                        } else {
+                            var copiedArgs = try multiClos.argNames.clone();
+                            errdefer copiedArgs.deinit();
+                            i = 0;
+                            while (i < numArgs) : (i += 1) {
+                                _ = copiedArgs.orderedRemove(0);
+                            }
+                            return .{ .object = try self.objects.makeMultiArgClosure(
+                                copiedArgs,
+                                copiedEnv,
+                                multiClos.code,
+                            ) };
                         }
                     },
                 }
@@ -337,16 +483,34 @@ pub const Interpreter = struct {
                 const function = try self.eval(call.function);
                 return self.evalCall(function, call.arg);
             },
+            .callMult => |*callMult| {
+                const function = try self.eval(callMult.function);
+                return self.evalCallMult(function, &callMult.args);
+            },
             .lambda => |lambda| {
-                // var boundEnv = std.StringHashMap(Value).init(self.allocator);
-                // errdefer boundEnv.deinit();
-                // const enclosed = lambda.encloses.?.items;
-                // var i: usize = 0;
-                // while (i < enclosed.len) : (i += 1) {
-                //     try boundEnv.put(enclosed[i], self.lookup(enclosed[i]).?);
-                // }
-                const boundEnv = try self.currentEnv.contents.clone();
+                var boundEnv = std.StringHashMap(Value).init(self.allocator);
+                errdefer boundEnv.deinit();
+                const enclosed = lambda.encloses.?.items;
+                var i: usize = 0;
+                while (i < enclosed.len) : (i += 1) {
+                    try boundEnv.put(enclosed[i], self.lookup(enclosed[i]).?);
+                }
                 const closure = try self.objects.makeClosure(lambda.argname, boundEnv, lambda.expr);
+                return .{ .object = closure };
+            },
+            .lambdaMult => |lambdaMult| {
+                var boundEnv = std.StringHashMap(Value).init(self.allocator);
+                errdefer boundEnv.deinit();
+                const enclosed = lambdaMult.encloses.items;
+                var i: usize = 0;
+                while (i < enclosed.len) : (i += 1) {
+                    try boundEnv.put(enclosed[i], self.lookup(enclosed[i]).?);
+                }
+                const closure = try self.objects.makeMultiArgClosure(
+                    try lambdaMult.argnames.clone(),
+                    boundEnv,
+                    lambdaMult.expr,
+                );
                 return .{ .object = closure };
             },
             .operator => |op| {

@@ -1,5 +1,6 @@
 const std = @import("std");
 const AST = @import("ast.zig").AST;
+const token = @import("./token.zig");
 
 pub const OptimizeClosures = struct {
     fn findEnclosed(
@@ -43,6 +44,8 @@ pub const OptimizeClosures = struct {
                     _ = exclude.remove(lambda.argname.lexeme);
                 }
             },
+            .lambdaMult => {},
+            .callMult => {},
         }
     }
 
@@ -79,6 +82,130 @@ pub const OptimizeClosures = struct {
             .prefixOp => |prefixOp| {
                 try run(prefixOp.expr, allocator);
             },
+            .lambdaMult => {},
+            .callMult => {},
+        }
+    }
+};
+
+pub const OptimizeFullyInstantiatedCalls = struct {
+    fn combineLambdas(ast: *AST, allocator: std.mem.Allocator) !void {
+        errdefer ast.* = .{ .boolConstant = .{
+            .token = .{ .type = .BoolLiteral, .start = 0, .end = 0, .lexeme = "" },
+            .value = true,
+        } };
+        var currentExpr = ast;
+        var isLambda = true;
+        var arguments = std.ArrayList(token.Token).init(allocator);
+        while (isLambda) {
+            errdefer currentExpr.deinit(allocator);
+            try arguments.append(currentExpr.lambda.argname);
+            currentExpr = currentExpr.lambda.expr;
+            switch (currentExpr.*) {
+                .lambda => {
+                    isLambda = true;
+                },
+                else => {
+                    isLambda = false;
+                },
+            }
+        }
+        const innerExpr = currentExpr;
+        currentExpr = ast.lambda.expr;
+        isLambda = true;
+        while (isLambda) {
+            const prev = currentExpr;
+            currentExpr = currentExpr.lambda.expr;
+            prev.lambda.encloses.?.deinit();
+            allocator.destroy(prev);
+            switch (currentExpr.*) {
+                .lambda => {
+                    isLambda = true;
+                },
+                else => {
+                    isLambda = false;
+                },
+            }
+        }
+        ast.* = .{ .lambdaMult = .{
+            .argnames = arguments,
+            .start = ast.lambda.start,
+            .expr = innerExpr,
+            .encloses = ast.lambda.encloses.?,
+        } };
+    }
+
+    fn combineCalls(ast: *AST, allocator: std.mem.Allocator) !*AST {
+        errdefer ast.* = .{ .boolConstant = .{
+            .token = .{ .type = .BoolLiteral, .start = 0, .end = 0, .lexeme = "" },
+            .value = true,
+        } };
+        var arguments: std.ArrayList(*AST) = undefined;
+        var fun: *AST = undefined;
+        switch (ast.call.function.*) {
+            .call => {
+                fun = try combineCalls(ast.call.function, allocator);
+                arguments = ast.call.function.callMult.args;
+                allocator.destroy(ast.call.function);
+            },
+            else => {
+                arguments = .init(allocator);
+                fun = ast.call.function;
+            },
+        }
+        try arguments.append(ast.call.arg);
+        ast.* = .{ .callMult = .{
+            .function = fun,
+            .args = arguments,
+        } };
+        return fun;
+    }
+
+    pub fn run(ast: *AST, allocator: std.mem.Allocator) !void {
+        switch (ast.*) {
+            .intConstant, .floatConstant, .boolConstant, .identifier => {},
+            .let => |let| {
+                try run(let.in, allocator);
+                try run(let.be, allocator);
+            },
+            .ifExpr => |ifExpr| {
+                try run(ifExpr.predicate, allocator);
+                try run(ifExpr.thenExpr, allocator);
+                try run(ifExpr.elseExpr, allocator);
+            },
+            .call => |call| {
+                switch (call.function.*) {
+                    .call => {
+                        _ = try combineCalls(ast, allocator);
+                        try run(ast.callMult.function, allocator);
+                    },
+                    else => {
+                        try run(call.function, allocator);
+                        try run(call.arg, allocator);
+                    },
+                }
+            },
+            .operator => |op| {
+                try run(op.left, allocator);
+                try run(op.right, allocator);
+            },
+            .lambda => |lambda| {
+                switch (lambda.expr.*) {
+                    .lambda => {
+                        try combineLambdas(ast, allocator);
+
+                        try run(ast.lambdaMult.expr, allocator);
+                    },
+                    else => {
+                        try run(lambda.expr, allocator);
+                    },
+                }
+            },
+            .prefixOp => |prefixOp| {
+                try run(prefixOp.expr, allocator);
+            },
+            .lambdaMult => {},
+            .callMult => {},
         }
     }
 };

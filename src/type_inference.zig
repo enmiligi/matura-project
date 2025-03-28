@@ -730,6 +730,8 @@ pub const AlgorithmJ = struct {
                 deinitScheme(generalised, self.allocator);
                 return typeOfExpr;
             },
+            .lambdaMult => {},
+            .callMult => {},
         }
         return t;
     }

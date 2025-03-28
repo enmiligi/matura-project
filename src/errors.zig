@@ -58,9 +58,18 @@ pub const Errors = struct {
                 const end = computeBoundaries(lambda.expr).end;
                 return .{ .start = lambda.start, .end = end };
             },
+            .lambdaMult => |lambdaMult| {
+                const end = computeBoundaries(lambdaMult.expr).end;
+                return .{ .start = lambdaMult.start, .end = end };
+            },
             .call => |call| {
                 const end = computeBoundaries(call.arg).end;
                 const start = computeBoundaries(call.function).start;
+                return .{ .start = start, .end = end };
+            },
+            .callMult => |callMult| {
+                const end = computeBoundaries(callMult.args.items[0]).end;
+                const start = computeBoundaries(callMult.function).start;
                 return .{ .start = start, .end = end };
             },
             .let => |let| {

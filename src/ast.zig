@@ -14,6 +14,12 @@ pub const AST = union(enum) {
         expr: *AST,
         encloses: ?std.ArrayList([]const u8) = null,
     },
+    lambdaMult: struct {
+        start: usize,
+        argnames: std.ArrayList(token.Token),
+        expr: *AST,
+        encloses: std.ArrayList([]const u8),
+    },
     ifExpr: struct {
         start: usize,
         predicate: *AST,
@@ -23,6 +29,10 @@ pub const AST = union(enum) {
     call: struct {
         function: *AST,
         arg: *AST,
+    },
+    callMult: struct {
+        function: *AST,
+        args: std.ArrayList(*AST),
     },
     intConstant: struct {
         token: token.Token,
@@ -62,9 +72,21 @@ pub const AST = union(enum) {
                     encloses.deinit();
                 }
             },
+            .lambdaMult => |lambdaMult| {
+                lambdaMult.expr.deinit(allocator);
+                lambdaMult.argnames.deinit();
+                lambdaMult.encloses.deinit();
+            },
             .call => |call| {
                 call.function.deinit(allocator);
                 call.arg.deinit(allocator);
+            },
+            .callMult => |callMult| {
+                callMult.function.deinit(allocator);
+                for (callMult.args.items) |arg| {
+                    arg.deinit(allocator);
+                }
+                callMult.args.deinit();
             },
             .operator => |op| {
                 op.left.deinit(allocator);
@@ -105,6 +127,32 @@ pub const AST = union(enum) {
                 try writer.print("Lambda(argname: {s}, expr: ", .{lambda.argname.lexeme});
                 try lambda.expr.print(writer);
                 try writer.print(")", .{});
+            },
+            .lambdaMult => |lambdaMult| {
+                try writer.print("LambdaMult(args: [", .{});
+                var i: usize = 0;
+                while (i < lambdaMult.argnames.items.len) : (i += 1) {
+                    try writer.print("{s}", .{lambdaMult.argnames.items[i].lexeme});
+                    if (i != lambdaMult.argnames.items.len - 1) {
+                        try writer.print(", ", .{});
+                    }
+                }
+                try writer.print("], expr: ", .{});
+                try lambdaMult.expr.print(writer);
+                try writer.print(")", .{});
+            },
+            .callMult => |callMult| {
+                try writer.print("CallMult(function: ", .{});
+                try callMult.function.print(writer);
+                try writer.print(", args: [", .{});
+                var i: usize = 0;
+                while (i < callMult.args.items.len) : (i += 1) {
+                    try callMult.args.items[i].print(writer);
+                    if (i != callMult.args.items.len - 1) {
+                        try writer.print(", ", .{});
+                    }
+                }
+                try writer.print("])", .{});
             },
             .call => |call| {
                 try writer.print("Call(function: ", .{});
