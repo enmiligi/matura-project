@@ -22,7 +22,7 @@ pub const ObjectContent = union(enum) {
     recurse: ?Value,
 };
 
-const GCStressTest: bool = true;
+const GCStressTest: bool = false;
 const GCLog: bool = true;
 
 pub const Object = struct {

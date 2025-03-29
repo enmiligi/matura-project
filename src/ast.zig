@@ -130,6 +130,7 @@ pub const AST = union(enum) {
             },
             .lambdaMult => |lambdaMult| {
                 try writer.print("LambdaMult(args: [", .{});
+                // Arguments are stored in reverse order
                 var i: usize = lambdaMult.argnames.items.len;
                 while (i > 0) : (i -= 1) {
                     try writer.print("{s}", .{lambdaMult.argnames.items[i - 1].lexeme});
@@ -145,6 +146,7 @@ pub const AST = union(enum) {
                 try writer.print("CallMult(function: ", .{});
                 try callMult.function.print(writer);
                 try writer.print(", args: [", .{});
+                // Arguments are stored in reverse order
                 var i: usize = callMult.args.items.len;
                 while (i > 0) : (i -= 1) {
                     try callMult.args.items[i - 1].print(writer);

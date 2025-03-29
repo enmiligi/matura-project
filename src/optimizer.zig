@@ -16,9 +16,13 @@ pub const OptimizeClosures = struct {
                 }
             },
             .let => |let| {
+                const alreadyPresent = exclude.contains(let.name.lexeme);
                 try exclude.put(let.name.lexeme, undefined);
                 try findEnclosed(let.in, found, exclude);
                 try findEnclosed(let.be, found, exclude);
+                if (!alreadyPresent) {
+                    _ = exclude.remove(let.name.lexeme);
+                }
             },
             .ifExpr => |ifExpr| {
                 try findEnclosed(ifExpr.predicate, found, exclude);

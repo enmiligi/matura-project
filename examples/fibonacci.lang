@@ -1,7 +1,7 @@
 let fibonacci =
     lambda x.
         let fibonacciHelper =
-            lambda prev. lambda current. lambda n.
+            lambda prev. let a = 1 in lambda current. lambda n.
                 if n == x then
                     current
                 else

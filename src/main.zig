@@ -104,7 +104,8 @@ pub fn main() !u8 {
     try stdout.print("\n", .{});
     try bw.flush();
 
-    var interpreter_ = try interpreter.Interpreter.init(allocator);
+    var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
+    var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv);
     defer interpreter_.deinit();
     const result = try interpreter_.eval(fileAst);
     try value.printValue(result, stdout.any());

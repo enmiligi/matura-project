@@ -21,6 +21,7 @@ pub const Errors = struct {
         self.typeVarMap.deinit();
     }
 
+    // Indicate a subsequence with carets (^)
     fn printIndicator(self: *Errors, startIndex: usize, start: usize, end: usize) !void {
         const contents = try self.allocator.alloc(u8, end);
         defer self.allocator.free(contents);
@@ -39,6 +40,7 @@ pub const Errors = struct {
         try self.printYellow("{s}\n", .{contents});
     }
 
+    // Calculate the start and end of the code corresponding to the node of the AST
     pub fn computeBoundaries(ast: *AST) Region {
         switch (ast.*) {
             .intConstant => |iC| {
@@ -93,6 +95,8 @@ pub const Errors = struct {
         }
     }
 
+    // Print the first and last line of code of the Region
+    // and indicate the subsequence with carets (^)
     fn indicateRegion(self: *Errors, region: Region, comptime msg: []const u8, args: anytype, err: bool) !void {
         var startLine: usize = 0;
         var startOfLine: usize = 0;
@@ -144,6 +148,7 @@ pub const Errors = struct {
         try self.indicateRegion(computeBoundaries(ast), msg, args, err);
     }
 
+    // Errors are printed in red and in bold
     fn printError(self: *Errors, comptime msg: []const u8, args: anytype) !void {
         try self.printBold("\x1b[31merror: \x1b[39m", .{});
         try self.printBold(msg, args);
@@ -161,6 +166,8 @@ pub const Errors = struct {
         try self.stderr.print("\x1b[22m", .{});
     }
 
+    // Types are written in bold
+    // and yellow if it matches and red for the mismatched subtype
     fn printType(self: *Errors, t: *type_inference.Type, writer: std.io.AnyWriter, currentTypeVar: *usize, err: bool) !void {
         if (err) {
             try writer.print("\x1b[33;1m", .{});
@@ -171,6 +178,8 @@ pub const Errors = struct {
         try writer.print("\x1b[32m", .{});
     }
 
+    // For two types, print them to their corresponding writer
+    // while changing to error style if they mismatch
     fn compareTypes(
         self: *Errors,
         leftType: *type_inference.Type,
@@ -308,6 +317,8 @@ pub const Errors = struct {
         }
     }
 
+    // For two types, compare the types generating two strings
+    // which are red at the mismatching subtype
     fn stringCompareTypes(
         self: *Errors,
         leftType: *type_inference.Type,
@@ -326,6 +337,8 @@ pub const Errors = struct {
         return .{ .left = leftString, .right = rightString };
     }
 
+    // This error is printed when the type of a recursive value
+    // seems to be infinitely large
     pub fn recursionInfiniteType(
         self: *Errors,
         ast: *AST,
@@ -344,6 +357,7 @@ pub const Errors = struct {
         );
     }
 
+    // Error for when the type in the recursion is another than the complete type
     pub fn recursionTwoTypes(
         self: *Errors,
         ast: *AST,
@@ -362,6 +376,7 @@ pub const Errors = struct {
         );
     }
 
+    // This error is used when two types should be equal for various reasons
     pub fn typeComparison(
         self: *Errors,
         ast: *AST,
@@ -379,6 +394,7 @@ pub const Errors = struct {
         try self.indicateRegion(reasonAt, "", .{}, false);
     }
 
+    // Error for when two expressions should have the same type, but don't
     pub fn typeMismatch(
         self: *Errors,
         astLeft: *AST,
@@ -395,6 +411,7 @@ pub const Errors = struct {
         try self.printBold("because {s}\n", .{reasonWhyEqual});
     }
 
+    // Print an error at a specific point in the code
     pub fn errorAt(self: *Errors, start: usize, end: usize, comptime msg: []const u8, args: anytype) !void {
         var line: usize = 0;
         var startOfLine: usize = 0;
