@@ -190,3 +190,37 @@ pub const AST = union(enum) {
         }
     }
 };
+
+pub const Statement = union(enum) {
+    let: struct {
+        start: usize,
+        name: token.Token,
+        be: *AST,
+    },
+
+    // Recursively destroy all contained ASTs
+    pub fn deinit(self: *Statement, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .let => |let| {
+                let.be.deinit(allocator);
+            },
+        }
+    }
+
+    pub fn print(self: Statement, writer: std.io.AnyWriter) !void {
+        switch (self) {
+            .let => |let| {
+                try writer.print("Let(name: {s}, be: ", .{let.name.lexeme});
+                try let.be.print(writer);
+                try writer.print(")", .{});
+            },
+        }
+    }
+
+    pub fn deinitStatements(statements: std.ArrayList(Statement), allocator: std.mem.Allocator) void {
+        for (statements.items) |*statement| {
+            statement.deinit(allocator);
+        }
+        statements.deinit();
+    }
+};

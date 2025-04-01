@@ -149,7 +149,7 @@ pub const Errors = struct {
     }
 
     // Errors are printed in red and in bold
-    fn printError(self: *Errors, comptime msg: []const u8, args: anytype) !void {
+    pub fn printError(self: *Errors, comptime msg: []const u8, args: anytype) !void {
         try self.printBold("\x1b[31merror: \x1b[39m", .{});
         try self.printBold(msg, args);
     }

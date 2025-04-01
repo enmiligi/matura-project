@@ -32,7 +32,9 @@ pub const Lexer = struct {
 
     // This function generates the next token
     pub fn getToken(self: *Lexer) !token.Token {
-        self.skipWhitespace();
+        if (self.skipWhitespace()) |newStatement| {
+            return newStatement;
+        }
         self.tokenStart = self.location;
         if (self.isAtEnd()) return self.makeToken(.EOF);
         const c = self.getChar();
@@ -140,10 +142,20 @@ pub const Lexer = struct {
         return self.makeToken(tt);
     }
 
-    fn skipWhitespace(self: *Lexer) void {
+    fn skipWhitespace(self: *Lexer) ?token.Token {
+        var newLineOccurred = false;
         while (!self.isAtEnd() and std.ascii.isWhitespace(self.getChar())) {
+            if (self.getChar() == '\n') {
+                newLineOccurred = true;
+                self.tokenStart = self.location;
+            }
             self.location += 1;
         }
+        if (newLineOccurred and self.tokenStart + 1 == self.location) {
+            return self.makeToken(.NewStatement);
+        }
+        self.tokenStart = self.location;
+        return null;
     }
 
     fn getChar(self: *Lexer) u8 {

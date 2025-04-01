@@ -1,6 +1,7 @@
 const std = @import("std");
 const token = @import("./token.zig");
 const AST = @import("./ast.zig").AST;
+const Statement = @import("./ast.zig").Statement;
 const Value = @import("./value.zig").Value;
 const object = @import("./object.zig");
 
@@ -82,7 +83,7 @@ pub const Interpreter = struct {
         self.objects.currentEnv = next.?;
     }
 
-    fn lookup(self: *Interpreter, name: []const u8) ?Value {
+    pub fn lookup(self: *Interpreter, name: []const u8) ?Value {
         var env = self.currentEnv;
         while (!env.contents.contains(name)) {
             if (env.next) |nextEnv| {
@@ -463,7 +464,7 @@ pub const Interpreter = struct {
                         else => {},
                     }
                 }
-                return self.lookup(id.token.lexeme) orelse error.UnknownIdentifier;
+                return value orelse error.UnknownIdentifier;
             },
             .let => |let| {
                 const prev = self.currentEnv.contents.get(let.name.lexeme);
@@ -482,9 +483,6 @@ pub const Interpreter = struct {
                 if (prev) |prevValue| {
                     self.popValue();
                     try self.set(let.name.lexeme, prevValue);
-                    if (true) {
-                        return .{ .int = 2 };
-                    }
                 } else {
                     _ = self.remove(let.name.lexeme);
                 }
@@ -567,6 +565,18 @@ pub const Interpreter = struct {
                         return error.UnexpectedType;
                     },
                 }
+            },
+        }
+    }
+
+    pub fn runStatement(self: *Interpreter, statement: Statement) !void {
+        switch (statement) {
+            .let => |let| {
+                const recursionPointer = try self.objects.makeRecurse();
+                try self.set(let.name.lexeme, .{ .object = recursionPointer });
+                const val = try self.eval(let.be);
+                recursionPointer.content.recurse = val;
+                try self.set(let.name.lexeme, val);
             },
         }
     }

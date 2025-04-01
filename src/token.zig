@@ -19,6 +19,8 @@ pub const TokenType = enum {
     BoolLiteral,
     // user-defined
     Identifier,
+    // Newline with no whitespace
+    NewStatement,
     // End of File
     EOF,
 };
@@ -41,6 +43,7 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .If => "'if'",
         .Then => "'then'",
         .Else => "'else'",
+        .NewStatement => "the start of a new statement",
     };
     return name;
 }

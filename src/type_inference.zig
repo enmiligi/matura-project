@@ -1,6 +1,8 @@
 const std = @import("std");
 const AST = @import("./ast.zig").AST;
+const Statement = @import("./ast.zig").Statement;
 const Errors = @import("./errors.zig").Errors;
+const token = @import("token.zig");
 const computeBoundaries = @import("./errors.zig").Errors.computeBoundaries;
 
 const PrimitiveType = enum { Int, Float, Bool };
@@ -163,11 +165,19 @@ pub const AlgorithmJ = struct {
     depth: usize = 0,
     errors: *Errors,
 
+    globalTypes: TypeEnv,
+
     pub fn init(allocator: std.mem.Allocator, errs: *Errors) AlgorithmJ {
         return .{
             .allocator = allocator,
             .errors = errs,
+            .globalTypes = .init(allocator),
         };
+    }
+
+    pub fn deinit(self: *AlgorithmJ) void {
+        deinitTypeEnv(&self.globalTypes, self.allocator);
+        self.globalTypes.deinit();
     }
 
     pub fn getType(self: *AlgorithmJ, expr: *AST) !*Type {
@@ -373,7 +383,7 @@ pub const AlgorithmJ = struct {
     }
 
     // Create a replacement map and apply it
-    fn instantiate(self: *AlgorithmJ, forall: *Forall) !*Type {
+    pub fn instantiate(self: *AlgorithmJ, forall: *Forall) !*Type {
         var instantiatedVars = std.AutoHashMap(usize, *Type).init(self.allocator);
 
         var iterator = forall.typeVars.iterator();
@@ -441,6 +451,47 @@ pub const AlgorithmJ = struct {
         return typeScheme;
     }
 
+    fn lookup(self: *AlgorithmJ, name: []const u8, typeEnv: *TypeEnv) ?*TypeScheme {
+        return typeEnv.get(name) orelse self.globalTypes.get(name);
+    }
+
+    fn getLetVarType(self: *AlgorithmJ, typeEnv: *TypeEnv, name: token.Token, value: *AST) anyerror!*TypeScheme {
+        self.depth += 1;
+        const typeOfVarTypeVar = try Type.init(self.allocator);
+        typeOfVarTypeVar.* = self.newVarT();
+        const typeOfVarScheme = self.allocator.create(TypeScheme) catch |err| {
+            typeOfVarTypeVar.deinit(self.allocator);
+            return err;
+        };
+        typeOfVarScheme.* = .{ .type = typeOfVarTypeVar };
+        {
+            errdefer deinitScheme(typeOfVarScheme, self.allocator);
+            try typeEnv.put(name.lexeme, typeOfVarScheme);
+        }
+        const typeOfVar = try self.run(typeEnv, value);
+        {
+            errdefer typeOfVar.deinit(self.allocator);
+            self.unify(typeOfVarTypeVar, typeOfVar) catch |err| switch (err) {
+                error.CouldNotUnify => {
+                    try self.errors.recursionTwoTypes(value, name.lexeme, typeOfVarTypeVar, typeOfVar);
+                    return err;
+                },
+                error.InfiniteType => {
+                    try self.errors.recursionInfiniteType(value, name.lexeme, typeOfVarTypeVar, typeOfVar);
+                    return err;
+                },
+            };
+        }
+        self.depth -= 1;
+        const generalised = self.generalise(typeOfVar, self.depth + 1) catch |err| {
+            typeOfVar.deinit(self.allocator);
+            return err;
+        };
+        errdefer typeOfVar.deinit(self.allocator);
+        deinitScheme(typeOfVarScheme, self.allocator);
+        return generalised;
+    }
+
     // The main algorithm as described in the paper
     fn run(self: *AlgorithmJ, typeEnv: *TypeEnv, ast: *AST) !*Type {
         errdefer deinitTypeEnv(typeEnv, self.allocator);
@@ -448,7 +499,7 @@ pub const AlgorithmJ = struct {
         switch (ast.*) {
             .identifier => |id| {
                 self.allocator.destroy(t);
-                if (typeEnv.get(id.token.lexeme)) |typeOfIdScheme| {
+                if (self.lookup(id.token.lexeme, typeEnv)) |typeOfIdScheme| {
                     switch (typeOfIdScheme.*) {
                         .type => |typeOfId| {
                             typeOfId.rc += 1;
@@ -680,46 +731,12 @@ pub const AlgorithmJ = struct {
             },
             .let => |let| {
                 self.allocator.destroy(t);
-                self.depth += 1;
-                const typeOfVarTypeVar = try Type.init(self.allocator);
-                typeOfVarTypeVar.* = self.newVarT();
-                const typeOfVarScheme = self.allocator.create(TypeScheme) catch |err| {
-                    typeOfVarTypeVar.deinit(self.allocator);
-                    return err;
-                };
-                typeOfVarScheme.* = .{ .type = typeOfVarTypeVar };
                 const previous = typeEnv.get(let.name.lexeme);
                 errdefer if (previous) |pT| {
                     deinitScheme(pT, self.allocator);
                 };
-                {
-                    errdefer deinitScheme(typeOfVarScheme, self.allocator);
-                    try typeEnv.put(let.name.lexeme, typeOfVarScheme);
-                }
-                const typeOfVar = try self.run(typeEnv, let.be);
-                {
-                    errdefer typeOfVar.deinit(self.allocator);
-                    self.unify(typeOfVarTypeVar, typeOfVar) catch |err| switch (err) {
-                        error.CouldNotUnify => {
-                            try self.errors.recursionTwoTypes(let.be, let.name.lexeme, typeOfVarTypeVar, typeOfVar);
-                            return err;
-                        },
-                        error.InfiniteType => {
-                            try self.errors.recursionInfiniteType(let.be, let.name.lexeme, typeOfVarTypeVar, typeOfVar);
-                            return err;
-                        },
-                    };
-                }
-                self.depth -= 1;
-                const generalised = self.generalise(typeOfVar, self.depth + 1) catch |err| {
-                    typeOfVar.deinit(self.allocator);
-                    return err;
-                };
-                {
-                    errdefer typeOfVar.deinit(self.allocator);
-                    deinitScheme(typeOfVarScheme, self.allocator);
-                    try typeEnv.put(let.name.lexeme, generalised);
-                }
+                const generalised = try self.getLetVarType(typeEnv, let.name, let.be);
+                try typeEnv.put(let.name.lexeme, generalised);
                 const typeOfExpr = try self.run(typeEnv, let.in);
                 errdefer typeOfExpr.deinit(self.allocator);
                 if (previous) |previousType| {
@@ -734,5 +751,18 @@ pub const AlgorithmJ = struct {
             .callMult => {},
         }
         return t;
+    }
+
+    pub fn checkStatement(self: *AlgorithmJ, statement: Statement) !void {
+        switch (statement) {
+            .let => |let| {
+                if (self.globalTypes.contains(let.name.lexeme)) {
+                    try self.errors.errorAt(let.name.start, let.name.end, "The name '{s}' is already used.", .{let.name.lexeme});
+                }
+                const t = try self.getLetVarType(&self.globalTypes, let.name, let.be);
+                errdefer deinitScheme(t, self.allocator);
+                try self.globalTypes.put(let.name.lexeme, t);
+            },
+        }
     }
 };

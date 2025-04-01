@@ -1,1 +1,5 @@
-let x = 5 in (let x = lambda x. x in x) (let z = (let y = lambda x. x in 5) in (lambda x. x) z)
+let main =
+    let x = 5 in
+        (let x = lambda x. x in x)
+            (let z = (let y = lambda x. x in 5) in
+                (lambda x. x) z)

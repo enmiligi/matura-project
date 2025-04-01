@@ -1,5 +1,6 @@
 const std = @import("std");
 const AST = @import("ast.zig").AST;
+const Statement = @import("ast.zig").Statement;
 const token = @import("./token.zig");
 
 pub const OptimizeClosures = struct {
@@ -213,3 +214,12 @@ pub const OptimizeFullyInstantiatedCalls = struct {
         }
     }
 };
+
+pub fn optimizeStatement(statement: *Statement, allocator: std.mem.Allocator) !void {
+    switch (statement.*) {
+        .let => |let| {
+            try OptimizeClosures.run(let.be, allocator);
+            try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
+        },
+    }
+}

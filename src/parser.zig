@@ -2,6 +2,7 @@ const std = @import("std");
 const token = @import("./token.zig");
 const lexer = @import("./lexer.zig");
 const AST = @import("./ast.zig").AST;
+const Statement = @import("./ast.zig").Statement;
 const errors = @import("./errors.zig");
 
 const Precedence = usize;
@@ -52,6 +53,61 @@ pub const Parser = struct {
     // At the moment everything is an expression
     pub fn parse(self: *Parser) !*AST {
         return self.expression(0);
+    }
+
+    // file ::= statement*
+    pub fn file(self: *Parser) !std.ArrayList(Statement) {
+        var statements = std.ArrayList(Statement).init(self.allocator);
+        errdefer Statement.deinitStatements(statements, self.allocator);
+        while (self.peekToken().type != .EOF) {
+            const stmt = try self.statement();
+            try statements.append(stmt);
+            switch (self.peekToken().type) {
+                .NewStatement => {
+                    _ = try self.getToken();
+                },
+                .EOF => {},
+                else => {
+                    _ = try self.expectToken(.NewStatement);
+                },
+            }
+        }
+        return statements;
+    }
+
+    // At the moment, the only statement is let
+    fn statement(self: *Parser) !Statement {
+        if (self.peekToken().type == .Let) {
+            return self.letStatement();
+        } else {
+            try self.errs.errorAt(
+                self.peekToken().start,
+                self.peekToken().end,
+                "Didn't expect {s} at start of statement.",
+                .{token.formatTokenType(self.peekToken().type)},
+            );
+            return error.UnexpectedToken;
+        }
+    }
+
+    // letStatement ::= Let Identifier Equal expr
+    fn letStatement(self: *Parser) !Statement {
+        const start = self.peekToken().start;
+        _ = try self.getToken();
+
+        const name = try self.expectToken(.Identifier);
+
+        _ = try self.expectToken(.Equal);
+
+        const be = try self.expression(0);
+        errdefer be.deinit(self.allocator);
+
+        const letStmt: Statement = .{ .let = .{
+            .start = start,
+            .name = name,
+            .be = be,
+        } };
+        return letStmt;
     }
 
     // main loop as defined by Vaughan R. Pratt in
@@ -132,8 +188,8 @@ pub const Parser = struct {
         return expr;
     }
 
-    // let ::= Let Identifier Equal expr In expr
-    fn let(self: *Parser) !*AST {
+    // letExpression ::= Let Identifier Equal expr In expr
+    fn letExpression(self: *Parser) !*AST {
         const start = self.peekToken().start;
         _ = try self.getToken();
 
@@ -230,7 +286,7 @@ pub const Parser = struct {
             token.TokenType.BoolLiteral => boolLiteral,
             token.TokenType.LeftParen => brackets,
             token.TokenType.Identifier => identifier,
-            token.TokenType.Let => let,
+            token.TokenType.Let => letExpression,
             token.TokenType.Lambda => lambda,
             token.TokenType.If => ifExpr,
             token.TokenType.Operator => {

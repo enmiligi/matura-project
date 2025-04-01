@@ -73,7 +73,7 @@ pub fn main() !u8 {
     defer fileParser.deinit();
 
     // Parse an expression
-    const fileAst = fileParser.parseToEnd() catch |err| switch (err) {
+    const statements = fileParser.file() catch |err| switch (err) {
         error.InvalidChar, error.UnexpectedToken, error.InvalidPrefix => {
             try errbw.flush();
             return 1;
@@ -82,40 +82,69 @@ pub fn main() !u8 {
             return err;
         },
     };
-    defer fileAst.deinit(allocator);
+    defer ast.Statement.deinitStatements(statements, allocator);
 
     var algorithmJ = type_inference.AlgorithmJ.init(allocator, &errs);
+    defer algorithmJ.deinit();
 
-    const t = algorithmJ.getType(fileAst) catch |err| switch (err) {
-        error.UnknownIdentifier, error.CouldNotUnify, error.InfiniteType => {
-            try errbw.flush();
-            return 1;
-        },
-        else => {
-            return err;
-        },
-    };
-    defer t.deinit(allocator);
+    for (statements.items) |*statement| {
+        algorithmJ.checkStatement(statement.*) catch |err| switch (err) {
+            error.UnknownIdentifier, error.CouldNotUnify, error.InfiniteType => {
+                try errbw.flush();
+                return 1;
+            },
+            else => {
+                return err;
+            },
+        };
+        try optimizer.optimizeStatement(statement, allocator);
+    }
 
-    try optimizer.OptimizeClosures.run(fileAst, allocator);
-    try optimizer.OptimizeFullyInstantiatedCalls.run(fileAst, allocator);
+    if (algorithmJ.globalTypes.get("main") == null) {
+        try errs.printError("No 'main' defined", .{});
+        try errbw.flush();
+        return 1;
+    }
 
-    try fileAst.print(stdout.any());
-    try stdout.print("\n", .{});
+    for (statements.items) |statement| {
+        try statement.print(stdout.any());
+        try stdout.print("\n", .{});
+    }
     try bw.flush();
 
     var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
     var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv);
     defer interpreter_.deinit();
-    const result = try interpreter_.eval(fileAst);
+    for (statements.items) |statement| {
+        try interpreter_.runStatement(statement);
+    }
+    const result = interpreter_.lookup("main").?;
     try value.printValue(result, stdout.any());
 
     try stdout.print(": ", .{});
 
     var currentTypeVar: usize = 0;
     var typeVarMap = std.AutoHashMap(usize, usize).init(allocator);
+    defer typeVarMap.deinit();
 
-    try type_inference.printType(t, stdout.any(), &currentTypeVar, &typeVarMap);
+    const mainTypeScheme = algorithmJ.globalTypes.get("main").?;
+    var mainType: *type_inference.Type = undefined;
+    switch (mainTypeScheme.*) {
+        .type => |t| {
+            t.rc += 1;
+            mainType = t;
+        },
+        .forall => |*forall| {
+            mainType = try algorithmJ.instantiate(forall);
+        },
+    }
+    defer mainType.deinit(allocator);
+    try type_inference.printType(
+        mainType,
+        stdout.any(),
+        &currentTypeVar,
+        &typeVarMap,
+    );
     try stdout.print("\n", .{});
 
     try bw.flush();

@@ -1,1 +1,2 @@
-let f = lambda x. x in f == f
+let f = lambda x. x
+let main = f == f
