@@ -1,5 +1,7 @@
 const std = @import("std");
 const token = @import("./token.zig");
+const Type = @import("./type_inference.zig").Type;
+const Region = @import("./errors.zig").Region;
 
 pub const AST = union(enum) {
     let: struct {
@@ -11,6 +13,8 @@ pub const AST = union(enum) {
     lambda: struct {
         start: usize,
         argname: token.Token,
+        typeRegion: ?Region,
+        argType: ?*Type,
         expr: *AST,
         encloses: ?std.ArrayList([]const u8) = null,
     },
@@ -70,6 +74,9 @@ pub const AST = union(enum) {
                 lambda.expr.deinit(allocator);
                 if (lambda.encloses) |encloses| {
                     encloses.deinit();
+                }
+                if (lambda.argType) |argType| {
+                    argType.deinit(allocator);
                 }
             },
             .lambdaMult => |lambdaMult| {

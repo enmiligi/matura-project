@@ -68,8 +68,11 @@ pub fn main() !u8 {
     };
     defer errs.deinit();
 
+    var algorithmJ = type_inference.AlgorithmJ.init(allocator, &errs);
+    defer algorithmJ.deinit();
+
     // Create Parser
-    var fileParser = try parser.Parser.init(allocator, fileContents, &errs);
+    var fileParser = try parser.Parser.init(allocator, fileContents, &errs, &algorithmJ);
     defer fileParser.deinit();
 
     // Parse an expression
@@ -83,9 +86,6 @@ pub fn main() !u8 {
         },
     };
     defer ast.Statement.deinitStatements(statements, allocator);
-
-    var algorithmJ = type_inference.AlgorithmJ.init(allocator, &errs);
-    defer algorithmJ.deinit();
 
     for (statements.items) |*statement| {
         algorithmJ.checkStatement(statement.*) catch |err| switch (err) {

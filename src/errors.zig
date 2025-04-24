@@ -3,7 +3,7 @@ const Token = @import("./token.zig").Token;
 const type_inference = @import("./type_inference.zig");
 const AST = @import("./ast.zig").AST;
 
-const Region = struct {
+pub const Region = struct {
     start: usize,
     end: usize,
 };
@@ -392,6 +392,25 @@ pub const Errors = struct {
         try self.indicateAST(ast, "The type of this is: {s}", .{comparedTypes.left.items}, true);
         try self.printBold("which {s}: {s},\nbecause {s}\n", .{ err, comparedTypes.right.items, reason });
         try self.indicateRegion(reasonAt, "", .{}, false);
+    }
+
+    pub fn tooGeneralArgumentType(
+        self: *Errors,
+        ast: *AST,
+        argumentType: *type_inference.Type,
+    ) !void {
+        try self.indicateRegion(ast.lambda.typeRegion.?, "This type is annotated", .{}, true);
+        try self.indicateRegion(
+            .{ .start = ast.lambda.argname.start, .end = ast.lambda.argname.end },
+            "which is more general than the type of this argument",
+            .{},
+            false,
+        );
+        try self.stderr.print(", which is: ", .{});
+        try self.stderr.print("\x1b[32m", .{});
+        var currentTypeVar: usize = 0;
+        try self.printType(argumentType, self.stderr, &currentTypeVar, false);
+        try self.stderr.print("\x1b[39m", .{});
     }
 
     // Error for when two expressions should have the same type, but don't

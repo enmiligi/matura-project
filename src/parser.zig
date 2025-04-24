@@ -4,6 +4,7 @@ const lexer = @import("./lexer.zig");
 const AST = @import("./ast.zig").AST;
 const Statement = @import("./ast.zig").Statement;
 const errors = @import("./errors.zig");
+const type_inference = @import("./type_inference.zig");
 
 const Precedence = usize;
 const PrefixParseFn = *const fn (self: *Parser) anyerror!*AST;
@@ -15,6 +16,7 @@ const nullToken = token.Token{ .start = 0, .end = 0, .lexeme = "", .type = .Iden
 pub const ParserError = error{
     InvalidPrefix,
     UnexpectedToken,
+    InvalidType,
 };
 
 pub const Parser = struct {
@@ -23,9 +25,16 @@ pub const Parser = struct {
     next: token.Token,
     atEnd: bool = false,
     errs: *errors.Errors,
+    algorithmJ: *type_inference.AlgorithmJ,
+    typeVarMap: ?std.StringHashMap(*type_inference.Type),
 
     // Initialize parser and Lexer
-    pub fn init(allocator: std.mem.Allocator, source: []const u8, errs: *errors.Errors) !Parser {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        source: []const u8,
+        errs: *errors.Errors,
+        algorithmJ: *type_inference.AlgorithmJ,
+    ) !Parser {
         var l = try allocator.create(lexer.Lexer);
         l.* = .{ .source = source, .errs = errs };
         return .{
@@ -33,6 +42,8 @@ pub const Parser = struct {
             .lexer = l,
             .next = try l.getToken(),
             .errs = errs,
+            .algorithmJ = algorithmJ,
+            .typeVarMap = null,
         };
     }
 
@@ -50,9 +61,51 @@ pub const Parser = struct {
         return res;
     }
 
-    // At the moment everything is an expression
-    pub fn parse(self: *Parser) !*AST {
-        return self.expression(0);
+    pub fn typeExpr(self: *Parser, region: *errors.Region) !*type_inference.Type {
+        _ = try self.getToken();
+        var currentType: *type_inference.Type = undefined;
+        if (self.typeVar()) |typeVarName| {
+            region.start = typeVarName.start;
+            region.end = typeVarName.end;
+            if (self.typeVarMap.?.get(typeVarName.lexeme)) |tV| {
+                currentType = tV;
+                tV.rc += 1;
+            } else {
+                var newTypeVar = try type_inference.Type.init(self.allocator);
+                errdefer newTypeVar.deinit(self.allocator);
+                newTypeVar.* = self.algorithmJ.newVarT();
+                try self.typeVarMap.?.put(typeVarName.lexeme, newTypeVar);
+                currentType = newTypeVar;
+            }
+        } else if (self.typeName()) |tN| {
+            region.start = tN.start;
+            region.end = tN.end;
+            currentType = try type_inference.Type.init(self.allocator);
+            errdefer currentType.deinit(self.allocator);
+            if (std.mem.eql(u8, tN.lexeme, "Int")) {
+                currentType.data = .{ .primitive = .Int };
+            } else if (std.mem.eql(u8, tN.lexeme, "Float")) {
+                currentType.data = .{ .primitive = .Float };
+            } else if (std.mem.eql(u8, tN.lexeme, "Bool")) {
+                currentType.data = .{ .primitive = .Bool };
+            } else {
+                return error.InvalidType;
+            }
+        } else if (self.peekToken().type == .LeftParen) {
+            region.start = (try self.getToken()).start;
+            var r: errors.Region = .{ .start = 0, .end = 0 };
+            currentType = try self.typeExpr(&r);
+            region.end = (try self.expectToken(.RightParen)).end;
+        } else {
+            try self.errs.errorAt(
+                self.peekToken().start,
+                self.peekToken().end,
+                "Didn't expect {s} at start of type.",
+                .{token.formatTokenType(self.peekToken().type)},
+            );
+            return error.UnexpectedToken;
+        }
+        return currentType;
     }
 
     // file ::= statement*
@@ -77,17 +130,42 @@ pub const Parser = struct {
 
     // At the moment, the only statement is let
     fn statement(self: *Parser) !Statement {
-        if (self.peekToken().type == .Let) {
-            return self.letStatement();
-        } else {
-            try self.errs.errorAt(
-                self.peekToken().start,
-                self.peekToken().end,
-                "Didn't expect {s} at start of statement.",
-                .{token.formatTokenType(self.peekToken().type)},
-            );
-            return error.UnexpectedToken;
+        switch (self.peekToken().type) {
+            .Let => {
+                return self.letStatement();
+            },
+            else => {
+                try self.errs.errorAt(
+                    self.peekToken().start,
+                    self.peekToken().end,
+                    "Didn't expect {s} at start of statement.",
+                    .{token.formatTokenType(self.peekToken().type)},
+                );
+                return error.UnexpectedToken;
+            },
         }
+    }
+
+    fn typeVar(self: *Parser) ?token.Token {
+        if (self.peekToken().type == .Identifier) {
+            if (std.ascii.isLower(self.peekToken().lexeme[0])) {
+                return self.getToken() catch {
+                    return null;
+                };
+            }
+        }
+        return null;
+    }
+
+    fn typeName(self: *Parser) ?token.Token {
+        if (self.peekToken().type == .Identifier) {
+            if (std.ascii.isUpper(self.peekToken().lexeme[0])) {
+                return self.getToken() catch {
+                    return null;
+                };
+            }
+        }
+        return null;
     }
 
     // letStatement ::= Let Identifier Equal expr
@@ -222,6 +300,18 @@ pub const Parser = struct {
 
         const argname = try self.expectToken(.Identifier);
 
+        var argType: ?*type_inference.Type = null;
+        var typeRegion: ?errors.Region = null;
+        errdefer {
+            if (argType) |aT| {
+                aT.deinit(self.allocator);
+            }
+        }
+        if (self.peekToken().type == .Colon) {
+            typeRegion = .{ .start = 0, .end = 0 };
+            argType = try self.typeExpr(&typeRegion.?);
+        }
+
         _ = try self.expectToken(.Dot);
 
         const expr = try self.expression(0);
@@ -233,6 +323,8 @@ pub const Parser = struct {
             .argname = argname,
             .expr = expr,
             .encloses = null,
+            .argType = argType,
+            .typeRegion = typeRegion,
         } };
 
         return lambdaExpr;

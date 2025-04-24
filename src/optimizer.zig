@@ -151,6 +151,9 @@ pub const OptimizeFullyInstantiatedCalls = struct {
                 expr = ast.lambda.expr.lambdaMult.expr;
                 ast.lambda.expr.lambdaMult.encloses.deinit();
                 allocator.destroy(ast.lambda.expr);
+                if (ast.lambda.argType) |argType| {
+                    argType.deinit(allocator);
+                }
             },
             else => {
                 arguments = .init(allocator);
@@ -219,7 +222,7 @@ pub fn optimizeStatement(statement: *Statement, allocator: std.mem.Allocator) !v
     switch (statement.*) {
         .let => |let| {
             try OptimizeClosures.run(let.be, allocator);
-            try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
+            //try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
         },
     }
 }

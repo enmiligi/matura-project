@@ -23,6 +23,8 @@ pub const TokenType = enum {
     NewStatement,
     // End of File
     EOF,
+    // Type annotation
+    Colon,
 };
 
 pub fn formatTokenType(tt: TokenType) []const u8 {
@@ -44,6 +46,7 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .Then => "'then'",
         .Else => "'else'",
         .NewStatement => "the start of a new statement",
+        .Colon => "':'",
     };
     return name;
 }

@@ -54,6 +54,7 @@ pub const Lexer = struct {
                 '(' => .LeftParen,
                 ')' => .RightParen,
                 '.' => .Dot,
+                ':' => .Colon,
                 '+', '-', '*', '/', '<', '>' => .Operator,
                 else => null,
             };

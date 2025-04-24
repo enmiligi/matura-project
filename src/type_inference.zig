@@ -155,6 +155,7 @@ pub const InferenceError = error{
     CouldNotUnify,
     InfiniteType,
     UnknownIdentifier,
+    TooGeneral,
 };
 
 // The struct containing all global data used for Algorithm J
@@ -195,7 +196,7 @@ pub const AlgorithmJ = struct {
         };
     }
 
-    fn newVarT(self: *AlgorithmJ) Type {
+    pub fn newVarT(self: *AlgorithmJ) Type {
         return .{ .data = .{ .typeVar = self.newVar() }, .rc = 1 };
     }
 
@@ -233,6 +234,85 @@ pub const AlgorithmJ = struct {
         }
         typeB.rc += 1;
         typeVarA.subst = typeB;
+    }
+
+    fn lessGeneralUnify(self: *AlgorithmJ, typeA: *Type, typeB: *Type) !void {
+        switch (typeA.data) {
+            .typeVar => {
+                switch (typeB.data) {
+                    .typeVar => |*tV2| {
+                        if (tV2.subst) |subst| {
+                            try self.lessGeneralUnify(typeA, subst);
+                        } else {
+                            try addSubstitution(tV2, typeB);
+                        }
+                    },
+                    else => {
+                        return error.TooGeneral;
+                    },
+                }
+            },
+            .primitive => {
+                try self.unify(typeA, typeB);
+            },
+            .number => |*num1| {
+                if (num1.variable.data.typeVar.subst) |subst1| {
+                    switch (subst1.data) {
+                        .typeVar => {
+                            subst1.rc += 1;
+                            num1.variable.deinit(self.allocator);
+                            num1.variable = subst1;
+                            try self.lessGeneralUnify(typeA, typeB);
+                        },
+                        .primitive => {
+                            try self.lessGeneralUnify(subst1, typeB);
+                        },
+                        .number => {
+                            try self.lessGeneralUnify(subst1, typeB);
+                        },
+                        else => {
+                            return error.CouldNotUnify;
+                        },
+                    }
+                }
+                switch (typeB.data) {
+                    .typeVar => |tV2| {
+                        if (tV2.subst) |subst| {
+                            try self.lessGeneralUnify(typeA, subst);
+                        } else {
+                            try self.unify(typeA, typeB);
+                        }
+                    },
+                    .primitive => {
+                        return error.TooGeneral;
+                    },
+                    .number => |num2| {
+                        try self.lessGeneralUnify(num1.variable, num2.variable);
+                    },
+                    else => {
+                        return error.CouldNotUnify;
+                    },
+                }
+            },
+            .function => |fun1| {
+                switch (typeB.data) {
+                    .typeVar => |tV2| {
+                        if (tV2.subst) |subst| {
+                            try self.lessGeneralUnify(typeA, subst);
+                        } else {
+                            try self.unify(typeA, typeB);
+                        }
+                    },
+                    .function => |fun2| {
+                        try self.lessGeneralUnify(fun1.from, fun2.from);
+                        try self.lessGeneralUnify(fun1.to, fun2.to);
+                    },
+                    else => {
+                        return error.CouldNotUnify;
+                    },
+                }
+            },
+        }
     }
 
     // Unify typeA and typeB creating substitutions as needed
@@ -439,7 +519,7 @@ pub const AlgorithmJ = struct {
     }
 
     // Find all free vars
-    fn generalise(self: *AlgorithmJ, t: *Type, minDepth: usize) !*TypeScheme {
+    pub fn generalise(self: *AlgorithmJ, t: *Type, minDepth: usize) !*TypeScheme {
         var freeVars = TypeVarSet.init(self.allocator);
         try self.findFreeVars(t, minDepth, &freeVars);
         errdefer freeVars.deinit();
@@ -728,6 +808,28 @@ pub const AlgorithmJ = struct {
                     .from = newTypeVar,
                     .to = returnType,
                 } };
+                if (lambda.argType) |argType| {
+                    self.lessGeneralUnify(argType, newTypeVar) catch |err| switch (err) {
+                        error.TooGeneral => {
+                            try self.errors.tooGeneralArgumentType(ast, newTypeVar);
+                            return err;
+                        },
+                        error.CouldNotUnify => {
+                            try self.errors.typeComparison(
+                                ast,
+                                t,
+                                argType,
+                                "which should take as an argument this",
+                                "because this type is annotated.",
+                                lambda.typeRegion.?,
+                            );
+                            return err;
+                        },
+                        else => {
+                            return err;
+                        },
+                    };
+                }
             },
             .let => |let| {
                 self.allocator.destroy(t);
