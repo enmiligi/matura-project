@@ -130,6 +130,14 @@ pub const Parser = struct {
 
     // At the moment, the only statement is let
     fn statement(self: *Parser) !Statement {
+        const createdTypeVarMap = self.typeVarMap == null;
+        if (createdTypeVarMap) {
+            self.typeVarMap = .init(self.allocator);
+        }
+        defer if (createdTypeVarMap) {
+            self.typeVarMap.?.deinit();
+            self.typeVarMap = null;
+        };
         switch (self.peekToken().type) {
             .Let => {
                 return self.letStatement();

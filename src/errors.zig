@@ -407,10 +407,9 @@ pub const Errors = struct {
             false,
         );
         try self.stderr.print(", which is: ", .{});
-        try self.stderr.print("\x1b[32m", .{});
         var currentTypeVar: usize = 0;
         try self.printType(argumentType, self.stderr, &currentTypeVar, false);
-        try self.stderr.print("\x1b[39m", .{});
+        try self.stderr.print("\n", .{});
     }
 
     // Error for when two expressions should have the same type, but don't

@@ -798,12 +798,13 @@ pub const AlgorithmJ = struct {
                 }
                 const returnType = try self.run(typeEnv, lambda.expr);
                 errdefer returnType.deinit(self.allocator);
+                self.allocator.destroy(typeScheme);
+                errdefer newTypeVar.deinit(self.allocator);
                 if (previous) |previousType| {
                     try typeEnv.put(lambda.argname.lexeme, previousType);
                 } else {
                     _ = typeEnv.remove(lambda.argname.lexeme);
                 }
-                self.allocator.destroy(typeScheme);
                 t.data = .{ .function = .{
                     .from = newTypeVar,
                     .to = returnType,
@@ -820,7 +821,7 @@ pub const AlgorithmJ = struct {
                                 t,
                                 argType,
                                 "which should take as an argument this",
-                                "because this type is annotated.",
+                                "this type is annotated.",
                                 lambda.typeRegion.?,
                             );
                             return err;

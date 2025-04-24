@@ -89,7 +89,7 @@ pub fn main() !u8 {
 
     for (statements.items) |*statement| {
         algorithmJ.checkStatement(statement.*) catch |err| switch (err) {
-            error.UnknownIdentifier, error.CouldNotUnify, error.InfiniteType => {
+            error.UnknownIdentifier, error.CouldNotUnify, error.InfiniteType, error.TooGeneral => {
                 try errbw.flush();
                 return 1;
             },
