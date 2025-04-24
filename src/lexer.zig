@@ -47,6 +47,10 @@ pub const Lexer = struct {
         } else if (std.ascii.isDigit(c)) {
             return self.numberLiteral();
         } else {
+            if (c == '-' and self.source[self.location + 1] == '>') {
+                self.location += 2;
+                return self.makeToken(.Arrow);
+            }
             if (c == '=' or c == '!') {
                 return self.doubleOperator();
             }

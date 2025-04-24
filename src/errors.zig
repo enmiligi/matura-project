@@ -379,7 +379,7 @@ pub const Errors = struct {
     // This error is used when two types should be equal for various reasons
     pub fn typeComparison(
         self: *Errors,
-        ast: *AST,
+        codeRegion: Region,
         leftType: *type_inference.Type,
         rightType: *type_inference.Type,
         err: []const u8,
@@ -389,7 +389,7 @@ pub const Errors = struct {
         const comparedTypes = try self.stringCompareTypes(leftType, rightType);
         defer comparedTypes.left.deinit();
         defer comparedTypes.right.deinit();
-        try self.indicateAST(ast, "The type of this is: {s}", .{comparedTypes.left.items}, true);
+        try self.indicateRegion(codeRegion, "The type of this is: {s}", .{comparedTypes.left.items}, true);
         try self.printBold("which {s}: {s},\nbecause {s}\n", .{ err, comparedTypes.right.items, reason });
         try self.indicateRegion(reasonAt, "", .{}, false);
     }

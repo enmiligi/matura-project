@@ -25,6 +25,7 @@ pub const TokenType = enum {
     EOF,
     // Type annotation
     Colon,
+    Arrow,
 };
 
 pub fn formatTokenType(tt: TokenType) []const u8 {
@@ -47,6 +48,7 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .Else => "'else'",
         .NewStatement => "the start of a new statement",
         .Colon => "':'",
+        .Arrow => "'->'",
     };
     return name;
 }

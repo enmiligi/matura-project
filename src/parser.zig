@@ -95,6 +95,7 @@ pub const Parser = struct {
             region.start = (try self.getToken()).start;
             var r: errors.Region = .{ .start = 0, .end = 0 };
             currentType = try self.typeExpr(&r);
+            errdefer currentType.deinit(self.allocator);
             region.end = (try self.expectToken(.RightParen)).end;
         } else {
             try self.errs.errorAt(
@@ -104,6 +105,18 @@ pub const Parser = struct {
                 .{token.formatTokenType(self.peekToken().type)},
             );
             return error.UnexpectedToken;
+        }
+        if (self.peekToken().type == .Arrow) {
+            errdefer currentType.deinit(self.allocator);
+            var _region: errors.Region = .{ .start = 0, .end = 0 };
+            const returnType = try self.typeExpr(&_region);
+            errdefer returnType.deinit(self.allocator);
+            const argumentType = currentType;
+            currentType = try type_inference.Type.init(self.allocator);
+            currentType.data = .{ .function = .{
+                .from = argumentType,
+                .to = returnType,
+            } };
         }
         return currentType;
     }

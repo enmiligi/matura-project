@@ -618,7 +618,7 @@ pub const AlgorithmJ = struct {
                 self.unify(typeOfExpr, t) catch |err| switch (err) {
                     error.CouldNotUnify => {
                         try self.errors.typeComparison(
-                            prefixOp.expr,
+                            computeBoundaries(prefixOp.expr),
                             typeOfExpr,
                             t,
                             "which should be the same as the type of this",
@@ -650,7 +650,7 @@ pub const AlgorithmJ = struct {
                     self.unify(leftType, tNumber) catch |err| switch (err) {
                         error.CouldNotUnify => {
                             try self.errors.typeComparison(
-                                op.left,
+                                computeBoundaries(op.left),
                                 leftType,
                                 t,
                                 "which should be the same as the type of this",
@@ -705,7 +705,7 @@ pub const AlgorithmJ = struct {
                 self.unify(boolT, typeOfPredicate) catch |err| switch (err) {
                     error.CouldNotUnify => {
                         try self.errors.typeComparison(
-                            ifExpr.predicate,
+                            computeBoundaries(ifExpr.predicate),
                             typeOfPredicate,
                             boolT,
                             "should have this type: ",
@@ -755,7 +755,7 @@ pub const AlgorithmJ = struct {
                 self.unify(t1, fType) catch |err| switch (err) {
                     error.CouldNotUnify => {
                         try self.errors.typeComparison(
-                            call.function,
+                            computeBoundaries(call.function),
                             t1,
                             fType,
                             "should be the same as the type of this",
@@ -766,7 +766,7 @@ pub const AlgorithmJ = struct {
                     },
                     error.InfiniteType => {
                         try self.errors.typeComparison(
-                            call.function,
+                            computeBoundaries(call.function),
                             t1,
                             fType,
                             "leads to an infinite type\nwhen combined with the type of this",
@@ -817,10 +817,10 @@ pub const AlgorithmJ = struct {
                         },
                         error.CouldNotUnify => {
                             try self.errors.typeComparison(
-                                ast,
-                                t,
+                                .{ .start = lambda.argname.start, .end = lambda.argname.end },
+                                newTypeVar,
                                 argType,
-                                "which should take as an argument this",
+                                "which should be the same as this",
                                 "this type is annotated.",
                                 lambda.typeRegion.?,
                             );
