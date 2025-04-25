@@ -62,7 +62,6 @@ pub const Parser = struct {
     }
 
     pub fn typeExpr(self: *Parser, region: *errors.Region) !*type_inference.Type {
-        _ = try self.getToken();
         var currentType: *type_inference.Type = undefined;
         if (self.typeVar()) |typeVarName| {
             region.start = typeVarName.start;
@@ -94,6 +93,7 @@ pub const Parser = struct {
         } else if (self.peekToken().type == .LeftParen) {
             region.start = (try self.getToken()).start;
             var r: errors.Region = .{ .start = 0, .end = 0 };
+            std.debug.print("here", .{});
             currentType = try self.typeExpr(&r);
             errdefer currentType.deinit(self.allocator);
             region.end = (try self.expectToken(.RightParen)).end;
@@ -107,6 +107,7 @@ pub const Parser = struct {
             return error.UnexpectedToken;
         }
         if (self.peekToken().type == .Arrow) {
+            _ = try self.getToken();
             errdefer currentType.deinit(self.allocator);
             var _region: errors.Region = .{ .start = 0, .end = 0 };
             const returnType = try self.typeExpr(&_region);
@@ -329,6 +330,7 @@ pub const Parser = struct {
             }
         }
         if (self.peekToken().type == .Colon) {
+            _ = try self.getToken();
             typeRegion = .{ .start = 0, .end = 0 };
             argType = try self.typeExpr(&typeRegion.?);
         }

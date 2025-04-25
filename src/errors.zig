@@ -168,13 +168,13 @@ pub const Errors = struct {
 
     // Types are written in bold
     // and yellow if it matches and red for the mismatched subtype
-    fn printType(self: *Errors, t: *type_inference.Type, writer: std.io.AnyWriter, currentTypeVar: *usize, err: bool) !void {
+    fn printType(self: *Errors, t: *type_inference.Type, writer: std.io.AnyWriter, currentTypeVar: *usize, err: bool, topLevel: bool) !void {
         if (err) {
             try writer.print("\x1b[33;1m", .{});
         } else {
             try writer.print("\x1b[32;1m", .{});
         }
-        try type_inference.printType(t, writer, currentTypeVar, &self.typeVarMap);
+        try type_inference.printType(t, writer, currentTypeVar, &self.typeVarMap, topLevel, self.allocator);
         try writer.print("\x1b[32m", .{});
     }
 
@@ -187,25 +187,26 @@ pub const Errors = struct {
         leftWriter: std.io.AnyWriter,
         rightWriter: std.io.AnyWriter,
         currentTypeVar: *usize,
+        topLevel: bool,
     ) !void {
         switch (leftType.data) {
             .primitive => |prim1| {
                 switch (rightType.data) {
                     .primitive => |prim2| {
-                        try self.printType(leftType, leftWriter, currentTypeVar, prim1 != prim2);
-                        try self.printType(rightType, rightWriter, currentTypeVar, prim1 != prim2);
+                        try self.printType(leftType, leftWriter, currentTypeVar, prim1 != prim2, topLevel);
+                        try self.printType(rightType, rightWriter, currentTypeVar, prim1 != prim2, topLevel);
                     },
                     .typeVar => |typeVar2| {
                         if (typeVar2.subst) |subst| {
-                            try self.compareTypes(leftType, subst, leftWriter, rightWriter, currentTypeVar);
+                            try self.compareTypes(leftType, subst, leftWriter, rightWriter, currentTypeVar, topLevel);
                         } else {
-                            try self.printType(rightType, rightWriter, currentTypeVar, false);
-                            try self.printType(leftType, leftWriter, currentTypeVar, false);
+                            try self.printType(rightType, rightWriter, currentTypeVar, false, topLevel);
+                            try self.printType(leftType, leftWriter, currentTypeVar, false, topLevel);
                         }
                     },
                     .function => {
-                        try self.printType(leftType, leftWriter, currentTypeVar, true);
-                        try self.printType(rightType, rightWriter, currentTypeVar, true);
+                        try self.printType(leftType, leftWriter, currentTypeVar, true, topLevel);
+                        try self.printType(rightType, rightWriter, currentTypeVar, true, topLevel);
                     },
                     .number => |*num2| {
                         switch (num2.variable.data) {
@@ -214,23 +215,23 @@ pub const Errors = struct {
                                     subst.rc += 1;
                                     num2.variable.deinit(self.allocator);
                                     num2.variable = subst;
-                                    try self.compareTypes(leftType, rightType, leftWriter, rightWriter, currentTypeVar);
+                                    try self.compareTypes(leftType, rightType, leftWriter, rightWriter, currentTypeVar, topLevel);
                                 } else {
                                     switch (prim1) {
                                         .Int, .Float => {
-                                            try self.printType(leftType, leftWriter, currentTypeVar, false);
-                                            try self.printType(rightType, rightWriter, currentTypeVar, false);
+                                            try self.printType(leftType, leftWriter, currentTypeVar, false, topLevel);
+                                            try self.printType(rightType, rightWriter, currentTypeVar, false, topLevel);
                                         },
                                         .Bool => {
-                                            try self.printType(leftType, leftWriter, currentTypeVar, true);
-                                            try self.printType(rightType, rightWriter, currentTypeVar, true);
+                                            try self.printType(leftType, leftWriter, currentTypeVar, true, topLevel);
+                                            try self.printType(rightType, rightWriter, currentTypeVar, true, topLevel);
                                         },
                                     }
                                 }
                             },
                             .primitive => |prim2| {
-                                try self.printType(leftType, leftWriter, currentTypeVar, prim1 != prim2);
-                                try self.printType(rightType, rightWriter, currentTypeVar, prim1 != prim2);
+                                try self.printType(leftType, leftWriter, currentTypeVar, prim1 != prim2, topLevel);
+                                try self.printType(rightType, rightWriter, currentTypeVar, prim1 != prim2, topLevel);
                             },
                             else => {},
                         }
@@ -239,35 +240,39 @@ pub const Errors = struct {
             },
             .typeVar => |tV1| {
                 if (tV1.subst) |subst| {
-                    try self.compareTypes(subst, rightType, leftWriter, rightWriter, currentTypeVar);
+                    try self.compareTypes(subst, rightType, leftWriter, rightWriter, currentTypeVar, topLevel);
                 } else {
-                    try self.printType(leftType, leftWriter, currentTypeVar, false);
-                    try self.printType(rightType, rightWriter, currentTypeVar, false);
+                    try self.printType(leftType, leftWriter, currentTypeVar, false, topLevel);
+                    try self.printType(rightType, rightWriter, currentTypeVar, false, topLevel);
                 }
             },
             .function => |fun1| {
                 switch (rightType.data) {
                     .function => |fun2| {
-                        try leftWriter.print("(", .{});
-                        try rightWriter.print("(", .{});
-                        try self.compareTypes(fun1.from, fun2.from, leftWriter, rightWriter, currentTypeVar);
+                        if (!topLevel) {
+                            try leftWriter.print("(", .{});
+                            try rightWriter.print("(", .{});
+                        }
+                        try self.compareTypes(fun1.from, fun2.from, leftWriter, rightWriter, currentTypeVar, false);
                         try leftWriter.print(" -> ", .{});
                         try rightWriter.print(" -> ", .{});
-                        try self.compareTypes(fun1.to, fun2.to, leftWriter, rightWriter, currentTypeVar);
-                        try leftWriter.print(")", .{});
-                        try rightWriter.print(")", .{});
+                        try self.compareTypes(fun1.to, fun2.to, leftWriter, rightWriter, currentTypeVar, true);
+                        if (!topLevel) {
+                            try leftWriter.print(")", .{});
+                            try rightWriter.print(")", .{});
+                        }
                     },
                     .typeVar => |tV2| {
                         if (tV2.subst) |subst| {
-                            try self.compareTypes(leftType, subst, leftWriter, rightWriter, currentTypeVar);
+                            try self.compareTypes(leftType, subst, leftWriter, rightWriter, currentTypeVar, topLevel);
                         } else {
-                            try self.printType(leftType, leftWriter, currentTypeVar, false);
-                            try self.printType(rightType, rightWriter, currentTypeVar, false);
+                            try self.printType(leftType, leftWriter, currentTypeVar, false, topLevel);
+                            try self.printType(rightType, rightWriter, currentTypeVar, false, topLevel);
                         }
                     },
                     else => {
-                        try self.printType(leftType, leftWriter, currentTypeVar, true);
-                        try self.printType(rightType, rightWriter, currentTypeVar, true);
+                        try self.printType(leftType, leftWriter, currentTypeVar, true, topLevel);
+                        try self.printType(rightType, rightWriter, currentTypeVar, true, topLevel);
                     },
                 }
             },
@@ -278,38 +283,38 @@ pub const Errors = struct {
                             subst.rc += 1;
                             num1.variable.deinit(self.allocator);
                             num1.variable = subst;
-                            try self.compareTypes(leftType, rightType, leftWriter, rightWriter, currentTypeVar);
+                            try self.compareTypes(leftType, rightType, leftWriter, rightWriter, currentTypeVar, topLevel);
                         } else {
                             switch (rightType.data) {
                                 .typeVar => |tV2| {
                                     if (tV2.subst) |subst| {
-                                        try self.compareTypes(leftType, subst, leftWriter, rightWriter, currentTypeVar);
+                                        try self.compareTypes(leftType, subst, leftWriter, rightWriter, currentTypeVar, topLevel);
                                     } else {
-                                        try self.printType(leftType, leftWriter, currentTypeVar, false);
-                                        try self.printType(rightType, rightWriter, currentTypeVar, false);
+                                        try self.printType(leftType, leftWriter, currentTypeVar, false, topLevel);
+                                        try self.printType(rightType, rightWriter, currentTypeVar, false, topLevel);
                                     }
                                 },
                                 .primitive => |prim1| {
                                     switch (prim1) {
                                         .Int, .Float => {
-                                            try self.printType(leftType, leftWriter, currentTypeVar, false);
-                                            try self.printType(rightType, rightWriter, currentTypeVar, false);
+                                            try self.printType(leftType, leftWriter, currentTypeVar, false, topLevel);
+                                            try self.printType(rightType, rightWriter, currentTypeVar, false, topLevel);
                                         },
                                         .Bool => {
-                                            try self.printType(leftType, leftWriter, currentTypeVar, true);
-                                            try self.printType(rightType, rightWriter, currentTypeVar, true);
+                                            try self.printType(leftType, leftWriter, currentTypeVar, true, topLevel);
+                                            try self.printType(rightType, rightWriter, currentTypeVar, true, topLevel);
                                         },
                                     }
                                 },
                                 else => {
-                                    try self.printType(leftType, leftWriter, currentTypeVar, true);
-                                    try self.printType(rightType, rightWriter, currentTypeVar, true);
+                                    try self.printType(leftType, leftWriter, currentTypeVar, true, topLevel);
+                                    try self.printType(rightType, rightWriter, currentTypeVar, true, topLevel);
                                 },
                             }
                         }
                     },
                     .primitive => {
-                        try self.compareTypes(num1.variable, rightType, leftWriter, rightWriter, currentTypeVar);
+                        try self.compareTypes(num1.variable, rightType, leftWriter, rightWriter, currentTypeVar, topLevel);
                     },
                     else => {},
                 }
@@ -331,7 +336,7 @@ pub const Errors = struct {
         var rightWriter = rightString.writer();
         try leftWriter.print("\x1b[32m", .{});
         try rightWriter.print("\x1b[32m", .{});
-        try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar);
+        try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar, true);
         try leftWriter.print("\x1b[39m", .{});
         try rightWriter.print("\x1b[39m", .{});
         return .{ .left = leftString, .right = rightString };
@@ -408,7 +413,7 @@ pub const Errors = struct {
         );
         try self.stderr.print(", which is: ", .{});
         var currentTypeVar: usize = 0;
-        try self.printType(argumentType, self.stderr, &currentTypeVar, false);
+        try self.printType(argumentType, self.stderr, &currentTypeVar, false, true);
         try self.stderr.print("\n", .{});
     }
 

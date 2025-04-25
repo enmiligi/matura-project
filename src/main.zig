@@ -144,6 +144,8 @@ pub fn main() !u8 {
         stdout.any(),
         &currentTypeVar,
         &typeVarMap,
+        true,
+        allocator,
     );
     try stdout.print("\n", .{});
 

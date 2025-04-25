@@ -62,11 +62,18 @@ pub const Type = struct {
     }
 };
 
-pub fn printType(t: *Type, writer: std.io.AnyWriter, currentTypeVar: *usize, typeVarMap: *std.AutoHashMap(usize, usize)) !void {
+pub fn printType(
+    t: *Type,
+    writer: std.io.AnyWriter,
+    currentTypeVar: *usize,
+    typeVarMap: *std.AutoHashMap(usize, usize),
+    topLevel: bool,
+    allocator: std.mem.Allocator,
+) !void {
     switch (t.data) {
         .typeVar => |typeVar| {
             if (typeVar.subst) |substitution| {
-                try printType(substitution, writer, currentTypeVar, typeVarMap);
+                try printType(substitution, writer, currentTypeVar, typeVarMap, topLevel, allocator);
             } else {
                 var varNum: usize = undefined;
                 if (typeVarMap.get(typeVar.n)) |num| {
@@ -98,16 +105,33 @@ pub fn printType(t: *Type, writer: std.io.AnyWriter, currentTypeVar: *usize, typ
             }
         },
         .function => |function| {
-            try writer.print("(", .{});
-            try printType(function.from, writer, currentTypeVar, typeVarMap);
+            if (!topLevel) try writer.print("(", .{});
+            try printType(function.from, writer, currentTypeVar, typeVarMap, false, allocator);
             try writer.print(" -> ", .{});
-            try printType(function.to, writer, currentTypeVar, typeVarMap);
-            try writer.print(")", .{});
+            try printType(function.to, writer, currentTypeVar, typeVarMap, true, allocator);
+            if (!topLevel) try writer.print(")", .{});
         },
-        .number => |num| {
-            try writer.print("Number(", .{});
-            try printType(num.variable, writer, currentTypeVar, typeVarMap);
-            try writer.print(")", .{});
+        .number => |*num| {
+            if (num.variable.data.typeVar.subst) |subst| {
+                switch (subst.data) {
+                    .typeVar => {
+                        subst.rc += 1;
+                        num.variable.deinit(allocator);
+                        num.variable = subst;
+                        try printType(t, writer, currentTypeVar, typeVarMap, true, allocator);
+                    },
+                    .primitive, .number => {
+                        try printType(num.variable, writer, currentTypeVar, typeVarMap, true, allocator);
+                    },
+                    else => {
+                        return;
+                    },
+                }
+            } else {
+                try writer.print("Number(", .{});
+                try printType(num.variable, writer, currentTypeVar, typeVarMap, true, allocator);
+                try writer.print(")", .{});
+            }
         },
     }
 }
