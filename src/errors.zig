@@ -174,7 +174,7 @@ pub const Errors = struct {
         } else {
             try writer.print("\x1b[32;1m", .{});
         }
-        try type_inference.printType(t, writer, currentTypeVar, &self.typeVarMap, topLevel, self.allocator);
+        try type_inference.printTypeWithoutConstraints(t, writer, currentTypeVar, &self.typeVarMap, topLevel, self.allocator);
         try writer.print("\x1b[32m", .{});
     }
 
@@ -336,6 +336,9 @@ pub const Errors = struct {
         var rightWriter = rightString.writer();
         try leftWriter.print("\x1b[32m", .{});
         try rightWriter.print("\x1b[32m", .{});
+        try type_inference.printConstraints(leftType, leftWriter.any(), &currentTypeVar, &self.typeVarMap, self.allocator);
+        currentTypeVar = 0;
+        try type_inference.printConstraints(rightType, rightWriter.any(), &currentTypeVar, &self.typeVarMap, self.allocator);
         try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar, true);
         try leftWriter.print("\x1b[39m", .{});
         try rightWriter.print("\x1b[39m", .{});

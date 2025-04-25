@@ -62,7 +62,109 @@ pub const Type = struct {
     }
 };
 
-pub fn printType(
+fn collectConstraintsAndTypeVars(
+    t: *Type,
+    constraints: *std.AutoArrayHashMap(
+        usize,
+        std.StringHashMap(void),
+    ),
+    typeVarMap: *std.AutoHashMap(usize, usize),
+    currentTypeVar: *usize,
+    allocator: std.mem.Allocator,
+) !void {
+    switch (t.data) {
+        .typeVar => |typeVar| {
+            if (typeVar.subst) |substitution| {
+                try collectConstraintsAndTypeVars(substitution, constraints, typeVarMap, currentTypeVar, allocator);
+            } else {
+                var varNum: usize = undefined;
+                if (typeVarMap.get(typeVar.n)) |num| {
+                    varNum = num;
+                } else {
+                    varNum = currentTypeVar.*;
+                    try typeVarMap.put(typeVar.n, varNum);
+                    currentTypeVar.* += 1;
+                }
+            }
+        },
+        .function => |function| {
+            try collectConstraintsAndTypeVars(function.from, constraints, typeVarMap, currentTypeVar, allocator);
+            try collectConstraintsAndTypeVars(function.to, constraints, typeVarMap, currentTypeVar, allocator);
+        },
+        .number => |*num| {
+            if (num.variable.data.typeVar.subst) |subst| {
+                switch (subst.data) {
+                    .typeVar => {
+                        subst.rc += 1;
+                        num.variable.deinit(allocator);
+                        num.variable = subst;
+                        try collectConstraintsAndTypeVars(t, constraints, typeVarMap, currentTypeVar, allocator);
+                    },
+                    .number => {
+                        try collectConstraintsAndTypeVars(subst, constraints, typeVarMap, currentTypeVar, allocator);
+                    },
+                    else => {
+                        return;
+                    },
+                }
+            } else {
+                try collectConstraintsAndTypeVars(num.variable, constraints, typeVarMap, currentTypeVar, allocator);
+                const varNum = typeVarMap.get(num.variable.data.typeVar.n).?;
+                if (!constraints.contains(varNum)) {
+                    try constraints.put(varNum, .init(allocator));
+                }
+                try constraints.getPtr(varNum).?.put("Number", undefined);
+            }
+        },
+        else => {
+            return;
+        },
+    }
+}
+
+pub fn printConstraints(
+    t: *Type,
+    writer: std.io.AnyWriter,
+    currentTypeVar: *usize,
+    typeVarMap: *std.AutoHashMap(usize, usize),
+    allocator: std.mem.Allocator,
+) !void {
+    var constraints: std.AutoArrayHashMap(usize, std.StringHashMap(void)) = .init(allocator);
+    defer {
+        var iterator = constraints.iterator();
+        var constraint = iterator.next();
+        while (constraint) |constraintName| {
+            constraintName.value_ptr.deinit();
+            constraint = iterator.next();
+        }
+        constraints.deinit();
+    }
+    try collectConstraintsAndTypeVars(t, &constraints, typeVarMap, currentTypeVar, allocator);
+    var i: usize = 0;
+    const constraintList = constraints.keys();
+    while (i < constraintList.len) : (i += 1) {
+        var constraintNames = constraints.getPtr(constraintList[i]).?.keyIterator();
+        var currentConstraint: ?*[]const u8 = constraintNames.next();
+        while (currentConstraint) |currConstraint| {
+            try writer.print("{s} ", .{currConstraint.*});
+            if (constraintList[i] < 26) {
+                const byteVarNum: u8 = @intCast(constraintList[i]);
+                try writer.print("{c}", .{'a' + byteVarNum});
+            } else {
+                try writer.print("var_{d}", .{constraintList[i] - 26});
+            }
+            currentConstraint = constraintNames.next();
+            if (i != constraintList.len - 1 or currentConstraint != null) {
+                try writer.print(", ", .{});
+            }
+        }
+    }
+    if (constraintList.len != 0) {
+        try writer.print(" => ", .{});
+    }
+}
+
+pub fn printTypeWithoutConstraints(
     t: *Type,
     writer: std.io.AnyWriter,
     currentTypeVar: *usize,
@@ -73,21 +175,14 @@ pub fn printType(
     switch (t.data) {
         .typeVar => |typeVar| {
             if (typeVar.subst) |substitution| {
-                try printType(substitution, writer, currentTypeVar, typeVarMap, topLevel, allocator);
+                try printTypeWithoutConstraints(substitution, writer, currentTypeVar, typeVarMap, topLevel, allocator);
             } else {
-                var varNum: usize = undefined;
-                if (typeVarMap.get(typeVar.n)) |num| {
-                    varNum = num;
-                } else {
-                    varNum = currentTypeVar.*;
-                    try typeVarMap.put(typeVar.n, varNum);
-                    currentTypeVar.* += 1;
-                }
+                const varNum: usize = typeVarMap.get(typeVar.n).?;
                 if (varNum < 26) {
                     const byteVarNum: u8 = @intCast(varNum);
                     try writer.print("{c}", .{'a' + byteVarNum});
                 } else {
-                    try writer.print("var_{d}", .{currentTypeVar.* - 26});
+                    try writer.print("var_{d}", .{varNum - 26});
                 }
             }
         },
@@ -106,34 +201,27 @@ pub fn printType(
         },
         .function => |function| {
             if (!topLevel) try writer.print("(", .{});
-            try printType(function.from, writer, currentTypeVar, typeVarMap, false, allocator);
+            try printTypeWithoutConstraints(function.from, writer, currentTypeVar, typeVarMap, false, allocator);
             try writer.print(" -> ", .{});
-            try printType(function.to, writer, currentTypeVar, typeVarMap, true, allocator);
+            try printTypeWithoutConstraints(function.to, writer, currentTypeVar, typeVarMap, true, allocator);
             if (!topLevel) try writer.print(")", .{});
         },
         .number => |*num| {
-            if (num.variable.data.typeVar.subst) |subst| {
-                switch (subst.data) {
-                    .typeVar => {
-                        subst.rc += 1;
-                        num.variable.deinit(allocator);
-                        num.variable = subst;
-                        try printType(t, writer, currentTypeVar, typeVarMap, true, allocator);
-                    },
-                    .primitive, .number => {
-                        try printType(num.variable, writer, currentTypeVar, typeVarMap, true, allocator);
-                    },
-                    else => {
-                        return;
-                    },
-                }
-            } else {
-                try writer.print("Number(", .{});
-                try printType(num.variable, writer, currentTypeVar, typeVarMap, true, allocator);
-                try writer.print(")", .{});
-            }
+            try printTypeWithoutConstraints(num.variable, writer, currentTypeVar, typeVarMap, true, allocator);
         },
     }
+}
+
+pub fn printType(
+    t: *Type,
+    writer: std.io.AnyWriter,
+    currentTypeVar: *usize,
+    typeVarMap: *std.AutoHashMap(usize, usize),
+    topLevel: bool,
+    allocator: std.mem.Allocator,
+) !void {
+    try printConstraints(t, writer, currentTypeVar, typeVarMap, allocator);
+    try printTypeWithoutConstraints(t, writer, currentTypeVar, typeVarMap, topLevel, allocator);
 }
 
 const TypeVarSet = std.AutoHashMap(usize, void);
