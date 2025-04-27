@@ -76,6 +76,8 @@ pub fn main() !u8 {
     defer fileParser.deinit();
 
     // Parse an expression
+    // Set depth to max to ensure annotated type doesn't prevent generalization
+    algorithmJ.depth = std.math.maxInt(usize);
     const statements = fileParser.file() catch |err| switch (err) {
         error.InvalidChar, error.UnexpectedToken, error.InvalidPrefix => {
             try errbw.flush();
@@ -85,6 +87,8 @@ pub fn main() !u8 {
             return err;
         },
     };
+    // Reset depth
+    algorithmJ.depth = 0;
     defer ast.Statement.deinitStatements(statements, allocator);
 
     for (statements.items) |*statement| {

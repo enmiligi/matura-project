@@ -3,18 +3,23 @@ const token = @import("./token.zig");
 const Type = @import("./type_inference.zig").Type;
 const Region = @import("./errors.zig").Region;
 
+pub const TypeAnnotation = struct {
+    type: *Type,
+    region: Region,
+};
+
 pub const AST = union(enum) {
     let: struct {
         start: usize,
         name: token.Token,
         be: *AST,
+        type: ?TypeAnnotation,
         in: *AST,
     },
     lambda: struct {
         start: usize,
         argname: token.Token,
-        typeRegion: ?Region,
-        argType: ?*Type,
+        argType: ?TypeAnnotation,
         expr: *AST,
         encloses: ?std.ArrayList([]const u8) = null,
     },
@@ -69,6 +74,9 @@ pub const AST = union(enum) {
             .let => |let| {
                 let.be.deinit(allocator);
                 let.in.deinit(allocator);
+                if (let.type) |t| {
+                    t.type.deinit(allocator);
+                }
             },
             .lambda => |lambda| {
                 lambda.expr.deinit(allocator);
@@ -76,7 +84,7 @@ pub const AST = union(enum) {
                     encloses.deinit();
                 }
                 if (lambda.argType) |argType| {
-                    argType.deinit(allocator);
+                    argType.type.deinit(allocator);
                 }
             },
             .lambdaMult => |lambdaMult| {
@@ -203,6 +211,7 @@ pub const Statement = union(enum) {
         start: usize,
         name: token.Token,
         be: *AST,
+        annotation: ?TypeAnnotation,
     },
 
     // Recursively destroy all contained ASTs
@@ -210,6 +219,9 @@ pub const Statement = union(enum) {
         switch (self.*) {
             .let => |let| {
                 let.be.deinit(allocator);
+                if (let.annotation) |tA| {
+                    tA.type.deinit(allocator);
+                }
             },
         }
     }

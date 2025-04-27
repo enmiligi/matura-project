@@ -1,5 +1,6 @@
 const std = @import("std");
 const AST = @import("./ast.zig").AST;
+const TypeAnnotation = @import("./ast.zig").TypeAnnotation;
 const Statement = @import("./ast.zig").Statement;
 const Errors = @import("./errors.zig").Errors;
 const token = @import("token.zig");
@@ -18,6 +19,7 @@ pub const TypeVar = struct {
     n: usize,
     depth: usize,
     subst: ?*Type,
+    declaration: bool = false,
 };
 
 // This is the type used for non-generalised/instatiated types
@@ -338,13 +340,18 @@ pub const AlgorithmJ = struct {
 
     fn lessGeneralUnify(self: *AlgorithmJ, typeA: *Type, typeB: *Type) !void {
         switch (typeA.data) {
-            .typeVar => {
+            .typeVar => |tV1| {
                 switch (typeB.data) {
                     .typeVar => |*tV2| {
                         if (tV2.subst) |subst| {
                             try self.lessGeneralUnify(typeA, subst);
                         } else {
-                            try addSubstitution(tV2, typeB);
+                            if (tV1.n != tV2.n) {
+                                if (tV2.declaration) {
+                                    return error.TooGeneral;
+                                }
+                                try addSubstitution(tV2, typeA);
+                            }
                         }
                     },
                     else => {
@@ -352,8 +359,34 @@ pub const AlgorithmJ = struct {
                     },
                 }
             },
-            .primitive => {
-                try self.unify(typeA, typeB);
+            .primitive => |prim1| {
+                switch (typeB.data) {
+                    .typeVar => |*tV2| {
+                        if (tV2.subst) |subst| {
+                            try self.lessGeneralUnify(typeA, subst);
+                        } else {
+                            if (tV2.declaration) {
+                                return error.TooGeneral;
+                            }
+                            try addSubstitution(tV2, typeA);
+                        }
+                    },
+                    .number => |number2| {
+                        if (prim1 == .Float or prim1 == .Int) {
+                            try self.lessGeneralUnify(typeA, number2.variable);
+                        } else {
+                            return error.CouldNotUnify;
+                        }
+                    },
+                    .primitive => |prim2| {
+                        if (prim1 != prim2) {
+                            return error.CouldNotUnify;
+                        }
+                    },
+                    .function => {
+                        return error.CouldNotUnify;
+                    },
+                }
             },
             .number => |*num1| {
                 if (num1.variable.data.typeVar.subst) |subst1| {
@@ -374,33 +407,40 @@ pub const AlgorithmJ = struct {
                             return error.CouldNotUnify;
                         },
                     }
-                }
-                switch (typeB.data) {
-                    .typeVar => |tV2| {
-                        if (tV2.subst) |subst| {
-                            try self.lessGeneralUnify(typeA, subst);
-                        } else {
-                            try self.unify(typeA, typeB);
-                        }
-                    },
-                    .primitive => {
-                        return error.TooGeneral;
-                    },
-                    .number => |num2| {
-                        try self.lessGeneralUnify(num1.variable, num2.variable);
-                    },
-                    else => {
-                        return error.CouldNotUnify;
-                    },
+                } else {
+                    switch (typeB.data) {
+                        .typeVar => |*tV2| {
+                            if (tV2.subst) |subst| {
+                                try self.lessGeneralUnify(typeA, subst);
+                            } else {
+                                if (tV2.declaration) {
+                                    return error.TooGeneral;
+                                }
+                                try addSubstitution(tV2, typeA);
+                            }
+                        },
+                        .primitive => {
+                            return error.TooGeneral;
+                        },
+                        .number => |num2| {
+                            try self.lessGeneralUnify(num1.variable, num2.variable);
+                        },
+                        else => {
+                            return error.CouldNotUnify;
+                        },
+                    }
                 }
             },
             .function => |fun1| {
                 switch (typeB.data) {
-                    .typeVar => |tV2| {
+                    .typeVar => |*tV2| {
                         if (tV2.subst) |subst| {
                             try self.lessGeneralUnify(typeA, subst);
                         } else {
-                            try self.unify(typeA, typeB);
+                            if (tV2.declaration) {
+                                return error.TooGeneral;
+                            }
+                            try addSubstitution(tV2, typeA);
                         }
                     },
                     .function => |fun2| {
@@ -645,7 +685,7 @@ pub const AlgorithmJ = struct {
         return typeEnv.get(name) orelse self.globalTypes.get(name);
     }
 
-    fn getLetVarType(self: *AlgorithmJ, typeEnv: *TypeEnv, name: token.Token, value: *AST) anyerror!*TypeScheme {
+    fn getLetVarType(self: *AlgorithmJ, typeEnv: *TypeEnv, name: token.Token, value: *AST, annotation: ?TypeAnnotation) anyerror!*TypeScheme {
         self.depth += 1;
         const typeOfVarTypeVar = try Type.init(self.allocator);
         typeOfVarTypeVar.* = self.newVarT();
@@ -668,6 +708,30 @@ pub const AlgorithmJ = struct {
                 },
                 error.InfiniteType => {
                     try self.errors.recursionInfiniteType(value, name.lexeme, typeOfVarTypeVar, typeOfVar);
+                    return err;
+                },
+            };
+        }
+        if (annotation) |typeAnnotation| {
+            errdefer typeOfVar.deinit(self.allocator);
+            self.lessGeneralUnify(typeAnnotation.type, typeOfVar) catch |err| switch (err) {
+                error.TooGeneral => {
+                    try self.errors.tooGeneralVariableType(value, typeOfVar, typeAnnotation.region);
+                    return err;
+                },
+                error.CouldNotUnify => {
+                    try self.errors.typeComparison(
+                        computeBoundaries(value),
+                        typeOfVar,
+                        typeAnnotation.type,
+                        "which should be the same as this",
+                        "this type is annotated.",
+                        typeAnnotation.region,
+                    );
+                    return err;
+                },
+                else => {
+                    std.debug.print("{?}", .{err});
                     return err;
                 },
             };
@@ -920,7 +984,7 @@ pub const AlgorithmJ = struct {
                     .to = returnType,
                 } };
                 if (lambda.argType) |argType| {
-                    self.lessGeneralUnify(argType, newTypeVar) catch |err| switch (err) {
+                    self.lessGeneralUnify(argType.type, newTypeVar) catch |err| switch (err) {
                         error.TooGeneral => {
                             try self.errors.tooGeneralArgumentType(ast, newTypeVar);
                             return err;
@@ -929,10 +993,10 @@ pub const AlgorithmJ = struct {
                             try self.errors.typeComparison(
                                 .{ .start = lambda.argname.start, .end = lambda.argname.end },
                                 newTypeVar,
-                                argType,
+                                argType.type,
                                 "which should be the same as this",
                                 "this type is annotated.",
-                                lambda.typeRegion.?,
+                                argType.region,
                             );
                             return err;
                         },
@@ -948,7 +1012,7 @@ pub const AlgorithmJ = struct {
                 errdefer if (previous) |pT| {
                     deinitScheme(pT, self.allocator);
                 };
-                const generalised = try self.getLetVarType(typeEnv, let.name, let.be);
+                const generalised = try self.getLetVarType(typeEnv, let.name, let.be, let.type);
                 try typeEnv.put(let.name.lexeme, generalised);
                 const typeOfExpr = try self.run(typeEnv, let.in);
                 errdefer typeOfExpr.deinit(self.allocator);
@@ -972,7 +1036,7 @@ pub const AlgorithmJ = struct {
                 if (self.globalTypes.contains(let.name.lexeme)) {
                     try self.errors.errorAt(let.name.start, let.name.end, "The name '{s}' is already used.", .{let.name.lexeme});
                 }
-                const t = try self.getLetVarType(&self.globalTypes, let.name, let.be);
+                const t = try self.getLetVarType(&self.globalTypes, let.name, let.be, let.annotation);
                 errdefer deinitScheme(t, self.allocator);
                 try self.globalTypes.put(let.name.lexeme, t);
             },

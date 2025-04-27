@@ -2,6 +2,7 @@ const std = @import("std");
 const token = @import("./token.zig");
 const lexer = @import("./lexer.zig");
 const AST = @import("./ast.zig").AST;
+const TypeAnnotation = @import("./ast.zig").TypeAnnotation;
 const Statement = @import("./ast.zig").Statement;
 const errors = @import("./errors.zig");
 const type_inference = @import("./type_inference.zig");
@@ -75,6 +76,7 @@ pub const Parser = struct {
                             errdefer self.allocator.destroy(t);
                             const newTypeVar = try type_inference.Type.init(self.allocator);
                             newTypeVar.* = self.algorithmJ.newVarT();
+                            newTypeVar.data.typeVar.declaration = true;
                             newTypeVar.data.typeVar.subst = tV;
                             t.data = .{ .number = .{ .variable = newTypeVar } };
                         },
@@ -83,6 +85,7 @@ pub const Parser = struct {
                     errdefer self.allocator.destroy(t);
                     const newTypeVar = try type_inference.Type.init(self.allocator);
                     newTypeVar.* = self.algorithmJ.newVarT();
+                    newTypeVar.data.typeVar.declaration = true;
                     t.data = .{ .number = .{ .variable = newTypeVar } };
                 }
                 errdefer t.deinit(self.allocator);
@@ -122,6 +125,7 @@ pub const Parser = struct {
                 var newTypeVar = try type_inference.Type.init(self.allocator);
                 errdefer newTypeVar.deinit(self.allocator);
                 newTypeVar.* = self.algorithmJ.newVarT();
+                newTypeVar.data.typeVar.declaration = true;
                 try self.typeVarMap.?.put(typeVarName.lexeme, newTypeVar);
                 newTypeVar.rc += 1;
                 currentType = newTypeVar;
@@ -257,6 +261,19 @@ pub const Parser = struct {
 
         const name = try self.expectToken(.Identifier);
 
+        var typeAnnotation: ?TypeAnnotation = null;
+        errdefer {
+            if (typeAnnotation) |tA| {
+                tA.type.deinit(self.allocator);
+            }
+        }
+        if (self.peekToken().type == .Colon) {
+            _ = try self.getToken();
+            var typeRegion: errors.Region = .{ .start = 0, .end = 0 };
+            const t = try self.typeExpr(&typeRegion);
+            typeAnnotation = .{ .type = t, .region = typeRegion };
+        }
+
         _ = try self.expectToken(.Equal);
 
         const be = try self.expression(0);
@@ -266,6 +283,7 @@ pub const Parser = struct {
             .start = start,
             .name = name,
             .be = be,
+            .annotation = typeAnnotation,
         } };
         return letStmt;
     }
@@ -355,6 +373,19 @@ pub const Parser = struct {
 
         const name = try self.expectToken(.Identifier);
 
+        var typeAnnotation: ?TypeAnnotation = null;
+        errdefer {
+            if (typeAnnotation) |tA| {
+                tA.type.deinit(self.allocator);
+            }
+        }
+        if (self.peekToken().type == .Colon) {
+            _ = try self.getToken();
+            var typeRegion: errors.Region = .{ .start = 0, .end = 0 };
+            const t = try self.typeExpr(&typeRegion);
+            typeAnnotation = .{ .type = t, .region = typeRegion };
+        }
+
         _ = try self.expectToken(.Equal);
 
         const be = try self.expression(0);
@@ -371,6 +402,7 @@ pub const Parser = struct {
             .name = name,
             .be = be,
             .in = in,
+            .type = typeAnnotation,
         } };
         return letExpr;
     }
@@ -382,17 +414,17 @@ pub const Parser = struct {
 
         const argname = try self.expectToken(.Identifier);
 
-        var argType: ?*type_inference.Type = null;
-        var typeRegion: ?errors.Region = null;
+        var argType: ?TypeAnnotation = null;
         errdefer {
             if (argType) |aT| {
-                aT.deinit(self.allocator);
+                aT.type.deinit(self.allocator);
             }
         }
         if (self.peekToken().type == .Colon) {
             _ = try self.getToken();
-            typeRegion = .{ .start = 0, .end = 0 };
-            argType = try self.typeExpr(&typeRegion.?);
+            var typeRegion: errors.Region = .{ .start = 0, .end = 0 };
+            const t = try self.typeExpr(&typeRegion);
+            argType = .{ .type = t, .region = typeRegion };
         }
 
         _ = try self.expectToken(.Dot);
@@ -407,7 +439,6 @@ pub const Parser = struct {
             .expr = expr,
             .encloses = null,
             .argType = argType,
-            .typeRegion = typeRegion,
         } };
 
         return lambdaExpr;

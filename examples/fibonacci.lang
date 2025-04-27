@@ -1,4 +1,4 @@
-let fibonacciHelper =
+let fibonacciHelper: Number a => a -> a -> Int -> Int =
     lambda prev. lambda current. lambda n.
         if n > 0 then
             fibonacciHelper current (prev + current) (n - 1)

@@ -166,6 +166,12 @@ pub const Errors = struct {
         try self.stderr.print("\x1b[22m", .{});
     }
 
+    fn printConstraints(self: *Errors, t: *type_inference.Type, writer: std.io.AnyWriter, currentTypeVar: *usize) !void {
+        try writer.print("\x1b[32;1m", .{});
+        try type_inference.printConstraints(t, writer, currentTypeVar, &self.typeVarMap, self.allocator);
+        try writer.print("\x1b[32m", .{});
+    }
+
     // Types are written in bold
     // and yellow if it matches and red for the mismatched subtype
     fn printType(self: *Errors, t: *type_inference.Type, writer: std.io.AnyWriter, currentTypeVar: *usize, err: bool, topLevel: bool) !void {
@@ -336,9 +342,9 @@ pub const Errors = struct {
         var rightWriter = rightString.writer();
         try leftWriter.print("\x1b[32m", .{});
         try rightWriter.print("\x1b[32m", .{});
-        try type_inference.printConstraints(leftType, leftWriter.any(), &currentTypeVar, &self.typeVarMap, self.allocator);
+        try self.printConstraints(leftType, leftWriter.any(), &currentTypeVar);
         currentTypeVar = 0;
-        try type_inference.printConstraints(rightType, rightWriter.any(), &currentTypeVar, &self.typeVarMap, self.allocator);
+        try self.printConstraints(rightType, rightWriter.any(), &currentTypeVar);
         try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar, true);
         try leftWriter.print("\x1b[39m", .{});
         try rightWriter.print("\x1b[39m", .{});
@@ -407,7 +413,7 @@ pub const Errors = struct {
         ast: *AST,
         argumentType: *type_inference.Type,
     ) !void {
-        try self.indicateRegion(ast.lambda.typeRegion.?, "This type is annotated", .{}, true);
+        try self.indicateRegion(ast.lambda.argType.?.region, "This type is annotated", .{}, true);
         try self.indicateRegion(
             .{ .start = ast.lambda.argname.start, .end = ast.lambda.argname.end },
             "which is more general than the type of this argument",
@@ -416,7 +422,28 @@ pub const Errors = struct {
         );
         try self.stderr.print(", which is: ", .{});
         var currentTypeVar: usize = 0;
+        try self.printConstraints(argumentType, self.stderr, &currentTypeVar);
         try self.printType(argumentType, self.stderr, &currentTypeVar, false, true);
+        try self.stderr.print("\n", .{});
+    }
+
+    pub fn tooGeneralVariableType(
+        self: *Errors,
+        ast: *AST,
+        variableType: *type_inference.Type,
+        annotatedRegion: Region,
+    ) !void {
+        try self.indicateRegion(annotatedRegion, "This type is annotated", .{}, true);
+        try self.indicateRegion(
+            computeBoundaries(ast),
+            "which is more general than the type of this argument",
+            .{},
+            false,
+        );
+        try self.stderr.print(", which is: ", .{});
+        var currentTypeVar: usize = 0;
+        try self.printConstraints(variableType, self.stderr, &currentTypeVar);
+        try self.printType(variableType, self.stderr, &currentTypeVar, false, true);
         try self.stderr.print("\n", .{});
     }
 
