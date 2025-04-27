@@ -59,6 +59,7 @@ pub const Lexer = struct {
                 ')' => .RightParen,
                 '.' => .Dot,
                 ':' => .Colon,
+                ',' => .Comma,
                 '+', '-', '*', '/', '<', '>' => .Operator,
                 else => null,
             };
@@ -106,6 +107,9 @@ pub const Lexer = struct {
             if (self.getChar() == '=') {
                 self.location += 1;
                 tt = .Operator;
+            } else if (self.getChar() == '>') {
+                self.location += 1;
+                tt = .DoubleArrow;
             } else {
                 tt = .Equal;
             }

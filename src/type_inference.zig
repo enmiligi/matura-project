@@ -62,7 +62,7 @@ pub const Type = struct {
     }
 };
 
-const Constraint = struct {
+pub const Constraint = struct {
     typeVar: usize,
     name: []const u8,
 };

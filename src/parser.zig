@@ -61,10 +61,58 @@ pub const Parser = struct {
         return res;
     }
 
+    fn constraint(self: *Parser) !?usize {
+        if (self.peekToken().type == .Identifier and std.mem.eql(u8, self.peekToken().lexeme, "Number")) {
+            const numberToken = try self.getToken();
+            if (self.typeVar()) |typeVarName| {
+                const t = try type_inference.Type.init(self.allocator);
+                if (self.typeVarMap.?.get(typeVarName.lexeme)) |tV| {
+                    switch (tV.data) {
+                        .typeVar => {
+                            t.data = .{ .number = .{ .variable = tV } };
+                        },
+                        else => {
+                            errdefer self.allocator.destroy(t);
+                            const newTypeVar = try type_inference.Type.init(self.allocator);
+                            newTypeVar.* = self.algorithmJ.newVarT();
+                            t.data = .{ .number = .{ .variable = newTypeVar } };
+                        },
+                    }
+                } else {
+                    errdefer self.allocator.destroy(t);
+                    const newTypeVar = try type_inference.Type.init(self.allocator);
+                    newTypeVar.* = self.algorithmJ.newVarT();
+                    t.data = .{ .number = .{ .variable = newTypeVar } };
+                }
+                errdefer t.deinit(self.allocator);
+                try self.typeVarMap.?.put(typeVarName.lexeme, t);
+                return numberToken.start;
+            } else {
+                try self.errs.errorAt(self.peekToken().start, self.peekToken().end, "Expected this to be a type variable.", .{});
+            }
+        }
+        return null;
+    }
+
     pub fn typeExpr(self: *Parser, region: *errors.Region) !*type_inference.Type {
+        var start: usize = 0;
+        while (try self.constraint()) |constraintStart| {
+            if (start == 0) {
+                start = constraintStart;
+            }
+            if (self.peekToken().type == .Comma) {
+                _ = try self.getToken();
+            }
+        }
+        if (start != 0) {
+            region.start = start;
+            _ = try self.expectToken(.DoubleArrow);
+        }
         var currentType: *type_inference.Type = undefined;
         if (self.typeVar()) |typeVarName| {
-            region.start = typeVarName.start;
+            if (region.start == 0) {
+                region.start = typeVarName.start;
+            }
             region.end = typeVarName.end;
             if (self.typeVarMap.?.get(typeVarName.lexeme)) |tV| {
                 currentType = tV;
@@ -74,10 +122,13 @@ pub const Parser = struct {
                 errdefer newTypeVar.deinit(self.allocator);
                 newTypeVar.* = self.algorithmJ.newVarT();
                 try self.typeVarMap.?.put(typeVarName.lexeme, newTypeVar);
+                newTypeVar.rc += 1;
                 currentType = newTypeVar;
             }
         } else if (self.typeName()) |tN| {
-            region.start = tN.start;
+            if (region.start == 0) {
+                region.start = tN.start;
+            }
             region.end = tN.end;
             currentType = try type_inference.Type.init(self.allocator);
             errdefer currentType.deinit(self.allocator);
@@ -91,7 +142,10 @@ pub const Parser = struct {
                 return error.InvalidType;
             }
         } else if (self.peekToken().type == .LeftParen) {
-            region.start = (try self.getToken()).start;
+            const t = try self.getToken();
+            if (region.start == 0) {
+                region.start = t.start;
+            }
             var r: errors.Region = .{ .start = 0, .end = 0 };
             std.debug.print("here", .{});
             currentType = try self.typeExpr(&r);
@@ -109,8 +163,9 @@ pub const Parser = struct {
         if (self.peekToken().type == .Arrow) {
             _ = try self.getToken();
             errdefer currentType.deinit(self.allocator);
-            var _region: errors.Region = .{ .start = 0, .end = 0 };
-            const returnType = try self.typeExpr(&_region);
+            var innerRegion: errors.Region = .{ .start = 0, .end = 0 };
+            const returnType = try self.typeExpr(&innerRegion);
+            region.end = innerRegion.end;
             errdefer returnType.deinit(self.allocator);
             const argumentType = currentType;
             currentType = try type_inference.Type.init(self.allocator);
@@ -149,6 +204,10 @@ pub const Parser = struct {
             self.typeVarMap = .init(self.allocator);
         }
         defer if (createdTypeVarMap) {
+            var iterator = self.typeVarMap.?.valueIterator();
+            while (iterator.next()) |value| {
+                value.*.deinit(self.allocator);
+            }
             self.typeVarMap.?.deinit();
             self.typeVarMap = null;
         };

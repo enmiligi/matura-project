@@ -13,6 +13,7 @@ pub const TokenType = enum {
     LeftParen,
     RightParen,
     Operator,
+    Comma,
     // literals
     FloatLiteral,
     IntLiteral,
@@ -26,6 +27,7 @@ pub const TokenType = enum {
     // Type annotation
     Colon,
     Arrow,
+    DoubleArrow,
 };
 
 pub fn formatTokenType(tt: TokenType) []const u8 {
@@ -49,6 +51,8 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .NewStatement => "the start of a new statement",
         .Colon => "':'",
         .Arrow => "'->'",
+        .DoubleArrow => "'=>'",
+        .Comma => "','",
     };
     return name;
 }
