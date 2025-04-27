@@ -75,6 +75,7 @@ pub const Parser = struct {
                             errdefer self.allocator.destroy(t);
                             const newTypeVar = try type_inference.Type.init(self.allocator);
                             newTypeVar.* = self.algorithmJ.newVarT();
+                            newTypeVar.data.typeVar.subst = tV;
                             t.data = .{ .number = .{ .variable = newTypeVar } };
                         },
                     }
