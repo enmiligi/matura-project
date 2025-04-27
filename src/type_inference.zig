@@ -62,12 +62,14 @@ pub const Type = struct {
     }
 };
 
+const Constraint = struct {
+    typeVar: usize,
+    name: []const u8,
+};
+
 fn collectConstraintsAndTypeVars(
     t: *Type,
-    constraints: *std.AutoArrayHashMap(
-        usize,
-        std.StringHashMap(void),
-    ),
+    constraints: *std.AutoArrayHashMap(*Type, Constraint),
     typeVarMap: *std.AutoHashMap(usize, usize),
     currentTypeVar: *usize,
     allocator: std.mem.Allocator,
@@ -109,11 +111,10 @@ fn collectConstraintsAndTypeVars(
                 }
             } else {
                 try collectConstraintsAndTypeVars(num.variable, constraints, typeVarMap, currentTypeVar, allocator);
-                const varNum = typeVarMap.get(num.variable.data.typeVar.n).?;
-                if (!constraints.contains(varNum)) {
-                    try constraints.put(varNum, .init(allocator));
+                if (!constraints.contains(num.variable)) {
+                    const varNum = typeVarMap.get(num.variable.data.typeVar.n).?;
+                    try constraints.put(num.variable, .{ .name = "Number", .typeVar = varNum });
                 }
-                try constraints.getPtr(varNum).?.put("Number", undefined);
             }
         },
         else => {
@@ -129,37 +130,24 @@ pub fn printConstraints(
     typeVarMap: *std.AutoHashMap(usize, usize),
     allocator: std.mem.Allocator,
 ) !void {
-    var constraints: std.AutoArrayHashMap(usize, std.StringHashMap(void)) = .init(allocator);
-    defer {
-        var iterator = constraints.iterator();
-        var constraint = iterator.next();
-        while (constraint) |constraintName| {
-            constraintName.value_ptr.deinit();
-            constraint = iterator.next();
-        }
-        constraints.deinit();
-    }
-    try collectConstraintsAndTypeVars(t, &constraints, typeVarMap, currentTypeVar, allocator);
+    var constraintsMap: std.AutoArrayHashMap(*Type, Constraint) = .init(allocator);
+    defer constraintsMap.deinit();
+    try collectConstraintsAndTypeVars(t, &constraintsMap, typeVarMap, currentTypeVar, allocator);
     var i: usize = 0;
-    const constraintList = constraints.keys();
-    while (i < constraintList.len) : (i += 1) {
-        var constraintNames = constraints.getPtr(constraintList[i]).?.keyIterator();
-        var currentConstraint: ?*[]const u8 = constraintNames.next();
-        while (currentConstraint) |currConstraint| {
-            try writer.print("{s} ", .{currConstraint.*});
-            if (constraintList[i] < 26) {
-                const byteVarNum: u8 = @intCast(constraintList[i]);
-                try writer.print("{c}", .{'a' + byteVarNum});
-            } else {
-                try writer.print("var_{d}", .{constraintList[i] - 26});
-            }
-            currentConstraint = constraintNames.next();
-            if (i != constraintList.len - 1 or currentConstraint != null) {
-                try writer.print(", ", .{});
-            }
+    const constraints = constraintsMap.values();
+    while (i < constraints.len) : (i += 1) {
+        try writer.print("{s} ", .{constraints[i].name});
+        if (constraints[i].typeVar < 26) {
+            const byteVarNum: u8 = @intCast(constraints[i].typeVar);
+            try writer.print("{c}", .{'a' + byteVarNum});
+        } else {
+            try writer.print("var_{d}", .{constraints[i].typeVar - 26});
+        }
+        if (i != constraints.len - 1) {
+            try writer.print(", ", .{});
         }
     }
-    if (constraintList.len != 0) {
+    if (constraints.len != 0) {
         try writer.print(" => ", .{});
     }
 }
@@ -524,7 +512,12 @@ pub const AlgorithmJ = struct {
     }
 
     // Recursively copy the Type while replacing type variables
-    fn copyAndReplace(self: *AlgorithmJ, inputType: *Type, replacementMap: *const std.AutoHashMap(usize, *Type)) !*Type {
+    fn copyAndReplace(self: *AlgorithmJ, inputType: *Type, replacementMap: *const std.AutoHashMap(usize, *Type), copyMap: *std.AutoHashMap(*Type, *Type)) !*Type {
+        if (copyMap.get(inputType)) |copied| {
+            copied.rc += 1;
+            return copied;
+        }
+        var result: *Type = undefined;
         switch (inputType.data) {
             .typeVar => |typeVar| {
                 if (typeVar.subst) |subst| {
@@ -533,45 +526,48 @@ pub const AlgorithmJ = struct {
                     t.data = .{ .typeVar = .{
                         .n = typeVar.n,
                         .depth = typeVar.depth,
-                        .subst = try self.copyAndReplace(subst, replacementMap),
+                        .subst = try self.copyAndReplace(subst, replacementMap, copyMap),
                     } };
-                    return t;
+                    result = t;
                 } else {
                     if (replacementMap.get(typeVar.n)) |newTypeVar| {
                         newTypeVar.rc += 1;
-                        return newTypeVar;
+                        result = newTypeVar;
                     } else {
                         inputType.rc += 1;
-                        return inputType;
+                        result = inputType;
                     }
                 }
             },
             .primitive => |primitive| {
                 const t = try Type.init(self.allocator);
                 t.data = .{ .primitive = primitive };
-                return t;
+                result = t;
             },
             .number => |num| {
                 const t = try Type.init(self.allocator);
                 errdefer self.allocator.destroy(t);
-                const varCopied = try self.copyAndReplace(num.variable, replacementMap);
+                const varCopied = try self.copyAndReplace(num.variable, replacementMap, copyMap);
                 t.data = .{ .number = .{
                     .variable = varCopied,
                 } };
-                return t;
+                result = t;
             },
             .function => |function| {
                 const t = try Type.init(self.allocator);
                 errdefer self.allocator.destroy(t);
-                const fromCopied = try self.copyAndReplace(function.from, replacementMap);
+                const fromCopied = try self.copyAndReplace(function.from, replacementMap, copyMap);
                 errdefer fromCopied.deinit(self.allocator);
                 t.data = .{ .function = .{
                     .from = fromCopied,
-                    .to = try self.copyAndReplace(function.to, replacementMap),
+                    .to = try self.copyAndReplace(function.to, replacementMap, copyMap),
                 } };
-                return t;
+                result = t;
             },
         }
+        errdefer result.deinit(self.allocator);
+        try copyMap.put(inputType, result);
+        return result;
     }
 
     // Create a replacement map and apply it
@@ -600,7 +596,9 @@ pub const AlgorithmJ = struct {
             }
             instantiatedVars.deinit();
         }
-        return try self.copyAndReplace(forall.type, &instantiatedVars);
+        var copyMap = std.AutoHashMap(*Type, *Type).init(self.allocator);
+        defer copyMap.deinit();
+        return try self.copyAndReplace(forall.type, &instantiatedVars, &copyMap);
     }
 
     // Find all Free Vars contained in a Type
