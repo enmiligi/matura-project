@@ -27,6 +27,10 @@ pub const Type = struct {
     data: union(enum) {
         typeVar: TypeVar,
         primitive: PrimitiveType,
+        composite: struct {
+            name: []const u8,
+            args: std.ArrayList(*Type),
+        },
         function: struct {
             from: *Type,
             to: *Type,
@@ -57,6 +61,12 @@ pub const Type = struct {
                 },
                 .number => |num| {
                     num.variable.deinit(allocator);
+                },
+                .composite => |comp| {
+                    for (comp.args.items) |arg| {
+                        arg.deinit(allocator);
+                    }
+                    comp.args.deinit();
                 },
             }
             allocator.destroy(self);
@@ -189,6 +199,22 @@ pub fn printTypeWithoutConstraints(
                 },
             }
         },
+        .composite => |comp| {
+            if (!topLevel) try writer.print("(", .{});
+            try writer.print("{s}", .{comp.name});
+            for (comp.args.items) |arg| {
+                try writer.print(" ", .{});
+                try printTypeWithoutConstraints(
+                    arg,
+                    writer,
+                    currentTypeVar,
+                    typeVarMap,
+                    false,
+                    allocator,
+                );
+            }
+            if (!topLevel) try writer.print(")", .{});
+        },
         .function => |function| {
             if (!topLevel) try writer.print("(", .{});
             try printTypeWithoutConstraints(function.from, writer, currentTypeVar, typeVarMap, false, allocator);
@@ -269,18 +295,21 @@ pub const AlgorithmJ = struct {
     errors: *Errors,
 
     globalTypes: TypeEnv,
+    composite: std.StringHashMap(usize),
 
     pub fn init(allocator: std.mem.Allocator, errs: *Errors) AlgorithmJ {
         return .{
             .allocator = allocator,
             .errors = errs,
             .globalTypes = .init(allocator),
+            .composite = .init(allocator),
         };
     }
 
     pub fn deinit(self: *AlgorithmJ) void {
         deinitTypeEnv(&self.globalTypes, self.allocator);
         self.globalTypes.deinit();
+        self.composite.deinit();
     }
 
     pub fn getType(self: *AlgorithmJ, expr: *AST) !*Type {

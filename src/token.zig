@@ -28,6 +28,9 @@ pub const TokenType = enum {
     Colon,
     Arrow,
     DoubleArrow,
+    // Type declaration
+    Type,
+    VBar,
 };
 
 pub fn formatTokenType(tt: TokenType) []const u8 {
@@ -53,6 +56,8 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .Arrow => "'->'",
         .DoubleArrow => "'=>'",
         .Comma => "','",
+        .Type => "'type'",
+        .VBar => "'|'",
     };
     return name;
 }

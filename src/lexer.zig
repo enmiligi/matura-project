@@ -18,6 +18,7 @@ const identifierMap =
         .{ "if", .If },
         .{ "then", .Then },
         .{ "else", .Else },
+        .{ "type", .Type },
     });
 
 pub const Lexer = struct {
@@ -60,6 +61,7 @@ pub const Lexer = struct {
                 '.' => .Dot,
                 ':' => .Colon,
                 ',' => .Comma,
+                '|' => .VBar,
                 '+', '-', '*', '/', '<', '>' => .Operator,
                 else => null,
             };

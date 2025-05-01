@@ -1,6 +1,7 @@
 const std = @import("std");
 const token = @import("./token.zig");
 const Type = @import("./type_inference.zig").Type;
+const type_inference = @import("./type_inference.zig");
 const Region = @import("./errors.zig").Region;
 
 pub const TypeAnnotation = struct {
@@ -207,11 +208,19 @@ pub const AST = union(enum) {
 };
 
 pub const Statement = union(enum) {
+    pub const Constructor = struct {
+        name: token.Token,
+        args: std.ArrayList(*Type),
+    };
+
     let: struct {
-        start: usize,
         name: token.Token,
         be: *AST,
         annotation: ?TypeAnnotation,
+    },
+    type: struct {
+        name: token.Token,
+        constructors: std.ArrayList(Constructor),
     },
 
     // Recursively destroy all contained ASTs
@@ -223,15 +232,54 @@ pub const Statement = union(enum) {
                     tA.type.deinit(allocator);
                 }
             },
+            .type => |t| {
+                for (t.constructors.items) |constructor| {
+                    for (constructor.args.items) |arg| {
+                        arg.deinit(allocator);
+                    }
+                    constructor.args.deinit();
+                }
+                t.constructors.deinit();
+            },
         }
     }
 
-    pub fn print(self: Statement, writer: std.io.AnyWriter) !void {
+    pub fn print(self: Statement, writer: std.io.AnyWriter, allocator: std.mem.Allocator) !void {
         switch (self) {
             .let => |let| {
                 try writer.print("Let(name: {s}, be: ", .{let.name.lexeme});
                 try let.be.print(writer);
                 try writer.print(")", .{});
+            },
+            .type => |t| {
+                try writer.print("Type(name: {s}, constructors: [", .{t.name.lexeme});
+                var i: usize = 0;
+                var currentTypeVar: usize = 0;
+                var typeVarMap = std.AutoHashMap(usize, usize).init(allocator);
+                defer typeVarMap.deinit();
+                while (i < t.constructors.items.len) : (i += 1) {
+                    const constructor = &t.constructors.items[i];
+                    try writer.print("{s}(", .{constructor.name.lexeme});
+                    var j: usize = 0;
+                    while (j < constructor.args.items.len) : (j += 1) {
+                        try type_inference.printType(
+                            constructor.args.items[j],
+                            writer,
+                            &currentTypeVar,
+                            &typeVarMap,
+                            true,
+                            allocator,
+                        );
+                        if (j != constructor.args.items.len - 1) {
+                            try writer.print(", ", .{});
+                        }
+                    }
+                    try writer.print(")", .{});
+                    if (i != t.constructors.items.len - 1) {
+                        try writer.print(", ", .{});
+                    }
+                }
+                try writer.print("])", .{});
             },
         }
     }

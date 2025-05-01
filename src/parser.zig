@@ -98,7 +98,7 @@ pub const Parser = struct {
         return null;
     }
 
-    pub fn typeExpr(self: *Parser, region: *errors.Region) !*type_inference.Type {
+    pub fn typeExpr(self: *Parser, region: *errors.Region, declaredVars: bool, callPrecedence: bool) !*type_inference.Type {
         var start: usize = 0;
         while (try self.constraint()) |constraintStart| {
             if (start == 0) {
@@ -122,6 +122,15 @@ pub const Parser = struct {
                 currentType = tV;
                 tV.rc += 1;
             } else {
+                if (declaredVars) {
+                    try self.errs.errorAt(
+                        typeVarName.start,
+                        typeVarName.end,
+                        "The typevar '{s}' was not declared.",
+                        .{typeVarName.lexeme},
+                    );
+                    return error.UnexpectedToken;
+                }
                 var newTypeVar = try type_inference.Type.init(self.allocator);
                 errdefer newTypeVar.deinit(self.allocator);
                 newTypeVar.* = self.algorithmJ.newVarT();
@@ -136,13 +145,37 @@ pub const Parser = struct {
             }
             region.end = tN.end;
             currentType = try type_inference.Type.init(self.allocator);
-            errdefer currentType.deinit(self.allocator);
+            errdefer self.allocator.destroy(currentType);
             if (std.mem.eql(u8, tN.lexeme, "Int")) {
                 currentType.data = .{ .primitive = .Int };
             } else if (std.mem.eql(u8, tN.lexeme, "Float")) {
                 currentType.data = .{ .primitive = .Float };
             } else if (std.mem.eql(u8, tN.lexeme, "Bool")) {
                 currentType.data = .{ .primitive = .Bool };
+            } else if (self.algorithmJ.composite.get(tN.lexeme)) |numArgs| {
+                if (numArgs > 0 and !callPrecedence) {
+                    try self.errs.errorAt(
+                        tN.start,
+                        tN.end,
+                        "This type needs a type as an argument, did you forget parentheses?",
+                        .{},
+                    );
+                    return error.UnexpectedToken;
+                }
+                var args: std.ArrayList(*type_inference.Type) = .init(self.allocator);
+                errdefer {
+                    for (args.items) |arg| {
+                        arg.deinit(self.allocator);
+                    }
+                    args.deinit();
+                }
+                var i: usize = 0;
+                while (i < numArgs) : (i += 1) {
+                    var _region: errors.Region = .{ .start = 0, .end = 0 };
+                    const arg = try self.typeExpr(&_region, declaredVars, false);
+                    try args.append(arg);
+                }
+                currentType.data = .{ .composite = .{ .name = tN.lexeme, .args = args } };
             } else {
                 return error.InvalidType;
             }
@@ -152,8 +185,7 @@ pub const Parser = struct {
                 region.start = t.start;
             }
             var r: errors.Region = .{ .start = 0, .end = 0 };
-            std.debug.print("here", .{});
-            currentType = try self.typeExpr(&r);
+            currentType = try self.typeExpr(&r, declaredVars, true);
             errdefer currentType.deinit(self.allocator);
             region.end = (try self.expectToken(.RightParen)).end;
         } else {
@@ -169,7 +201,7 @@ pub const Parser = struct {
             _ = try self.getToken();
             errdefer currentType.deinit(self.allocator);
             var innerRegion: errors.Region = .{ .start = 0, .end = 0 };
-            const returnType = try self.typeExpr(&innerRegion);
+            const returnType = try self.typeExpr(&innerRegion, declaredVars, callPrecedence);
             region.end = innerRegion.end;
             errdefer returnType.deinit(self.allocator);
             const argumentType = currentType;
@@ -178,6 +210,16 @@ pub const Parser = struct {
                 .from = argumentType,
                 .to = returnType,
             } };
+        }
+        if (callPrecedence and (self.peekToken().type == .LeftParen or self.peekToken().type == .Identifier)) {
+            currentType.deinit(self.allocator);
+            try self.errs.errorAt(
+                self.peekToken().start,
+                self.peekToken().end,
+                "This type doesn't need an additional argument.",
+                .{},
+            );
+            return error.UnexpectedToken;
         }
         return currentType;
     }
@@ -204,21 +246,12 @@ pub const Parser = struct {
 
     // At the moment, the only statement is let
     fn statement(self: *Parser) !Statement {
-        const createdTypeVarMap = self.typeVarMap == null;
-        if (createdTypeVarMap) {
-            self.typeVarMap = .init(self.allocator);
-        }
-        defer if (createdTypeVarMap) {
-            var iterator = self.typeVarMap.?.valueIterator();
-            while (iterator.next()) |value| {
-                value.*.deinit(self.allocator);
-            }
-            self.typeVarMap.?.deinit();
-            self.typeVarMap = null;
-        };
         switch (self.peekToken().type) {
             .Let => {
                 return self.letStatement();
+            },
+            .Type => {
+                return self.typeStatement();
             },
             else => {
                 try self.errs.errorAt(
@@ -256,7 +289,6 @@ pub const Parser = struct {
 
     // letStatement ::= Let Identifier Equal expr
     fn letStatement(self: *Parser) !Statement {
-        const start = self.peekToken().start;
         _ = try self.getToken();
 
         const name = try self.expectToken(.Identifier);
@@ -270,7 +302,16 @@ pub const Parser = struct {
         if (self.peekToken().type == .Colon) {
             _ = try self.getToken();
             var typeRegion: errors.Region = .{ .start = 0, .end = 0 };
-            const t = try self.typeExpr(&typeRegion);
+            self.typeVarMap = .init(self.allocator);
+            defer {
+                var iterator = self.typeVarMap.?.valueIterator();
+                while (iterator.next()) |value| {
+                    value.*.deinit(self.allocator);
+                }
+                self.typeVarMap.?.deinit();
+                self.typeVarMap = null;
+            }
+            const t = try self.typeExpr(&typeRegion, false, true);
             typeAnnotation = .{ .type = t, .region = typeRegion };
         }
 
@@ -280,12 +321,109 @@ pub const Parser = struct {
         errdefer be.deinit(self.allocator);
 
         const letStmt: Statement = .{ .let = .{
-            .start = start,
             .name = name,
             .be = be,
             .annotation = typeAnnotation,
         } };
         return letStmt;
+    }
+
+    fn constructor(self: *Parser) !?Statement.Constructor {
+        if (self.typeName()) |constructorName| {
+            var args = std.ArrayList(*type_inference.Type).init(self.allocator);
+            errdefer {
+                for (args.items) |arg| {
+                    arg.deinit(self.allocator);
+                }
+                args.deinit();
+            }
+            var region: errors.Region = .{ .start = 0, .end = 0 };
+            while (self.peekToken().type == .Identifier or self.peekToken().type == .LeftParen) {
+                try args.append(try self.typeExpr(&region, true, false));
+            }
+            return .{ .name = constructorName, .args = args };
+        }
+        return null;
+    }
+
+    fn typeStatement(self: *Parser) !Statement {
+        _ = try self.getToken();
+
+        const name = try self.expectToken(.Identifier);
+        if (!std.ascii.isUpper(name.lexeme[0])) {
+            try self.errs.errorAt(name.start, name.end, "Types must start with uppercase letters.", .{});
+            return error.UnexpectedToken;
+        }
+
+        self.typeVarMap = .init(self.allocator);
+        defer {
+            var iterator = self.typeVarMap.?.valueIterator();
+            while (iterator.next()) |value| {
+                value.*.deinit(self.allocator);
+            }
+            self.typeVarMap.?.deinit();
+            self.typeVarMap = null;
+        }
+
+        var numTypeVars: usize = 0;
+        while (self.typeVar()) |typeVarArg| {
+            numTypeVars += 1;
+            if (self.typeVarMap.?.contains(typeVarArg.lexeme)) {
+                try self.errs.errorAt(typeVarArg.start, typeVarArg.end, "Type Variable already declared.", .{});
+                return error.UnexpectedToken;
+            }
+            const tV = try type_inference.Type.init(self.allocator);
+            tV.* = self.algorithmJ.newVarT();
+            errdefer tV.deinit(self.allocator);
+            try self.typeVarMap.?.put(typeVarArg.lexeme, tV);
+        }
+
+        try self.algorithmJ.composite.put(name.lexeme, numTypeVars);
+
+        _ = try self.expectToken(.Equal);
+
+        var constructors = std.ArrayList(Statement.Constructor).init(self.allocator);
+        errdefer {
+            for (constructors.items) |c| {
+                for (c.args.items) |arg| {
+                    arg.deinit(self.allocator);
+                }
+                c.args.deinit();
+            }
+            constructors.deinit();
+        }
+        var c = try self.constructor();
+        if (c) |constructor_| {
+            try constructors.append(constructor_);
+        } else {
+            try self.errs.errorAt(
+                self.peekToken().start,
+                self.peekToken().end,
+                "Expected the name of a constructor.",
+                .{},
+            );
+            return error.UnexpectedToken;
+        }
+        while (self.peekToken().type == .VBar) {
+            _ = try self.getToken();
+            c = try self.constructor();
+            if (c) |constructor_| {
+                try constructors.append(constructor_);
+            } else {
+                try self.errs.errorAt(
+                    self.peekToken().start,
+                    self.peekToken().end,
+                    "Expected the name of a constructor.",
+                    .{},
+                );
+                return error.UnexpectedToken;
+            }
+        }
+
+        return .{ .type = .{
+            .name = name,
+            .constructors = constructors,
+        } };
     }
 
     // main loop as defined by Vaughan R. Pratt in
@@ -382,7 +520,16 @@ pub const Parser = struct {
         if (self.peekToken().type == .Colon) {
             _ = try self.getToken();
             var typeRegion: errors.Region = .{ .start = 0, .end = 0 };
-            const t = try self.typeExpr(&typeRegion);
+            self.typeVarMap = .init(self.allocator);
+            defer {
+                var iterator = self.typeVarMap.?.valueIterator();
+                while (iterator.next()) |value| {
+                    value.*.deinit(self.allocator);
+                }
+                self.typeVarMap.?.deinit();
+                self.typeVarMap = null;
+            }
+            const t = try self.typeExpr(&typeRegion, false, true);
             typeAnnotation = .{ .type = t, .region = typeRegion };
         }
 
@@ -423,7 +570,16 @@ pub const Parser = struct {
         if (self.peekToken().type == .Colon) {
             _ = try self.getToken();
             var typeRegion: errors.Region = .{ .start = 0, .end = 0 };
-            const t = try self.typeExpr(&typeRegion);
+            self.typeVarMap = .init(self.allocator);
+            defer {
+                var iterator = self.typeVarMap.?.valueIterator();
+                while (iterator.next()) |value| {
+                    value.*.deinit(self.allocator);
+                }
+                self.typeVarMap.?.deinit();
+                self.typeVarMap = null;
+            }
+            const t = try self.typeExpr(&typeRegion, false, true);
             argType = .{ .type = t, .region = typeRegion };
         }
 

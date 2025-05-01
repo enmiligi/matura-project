@@ -16,7 +16,7 @@ const MainError = error{
 
 pub fn main() !u8 {
     // Initialize allocator for memory management
-    var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 32 }).init;
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
 
@@ -75,9 +75,9 @@ pub fn main() !u8 {
     var fileParser = try parser.Parser.init(allocator, fileContents, &errs, &algorithmJ);
     defer fileParser.deinit();
 
-    // Parse an expression
-    // Set depth to max to ensure annotated type doesn't prevent generalization
-    algorithmJ.depth = std.math.maxInt(usize);
+    // // Parse an expression
+    // // Set depth to max to ensure annotated type doesn't prevent generalization
+    // algorithmJ.depth = std.math.maxInt(usize);
     const statements = fileParser.file() catch |err| switch (err) {
         error.InvalidChar, error.UnexpectedToken, error.InvalidPrefix => {
             try errbw.flush();
@@ -87,71 +87,71 @@ pub fn main() !u8 {
             return err;
         },
     };
-    // Reset depth
-    algorithmJ.depth = 0;
+    // // Reset depth
+    // algorithmJ.depth = 0;
     defer ast.Statement.deinitStatements(statements, allocator);
 
-    for (statements.items) |*statement| {
-        algorithmJ.checkStatement(statement.*) catch |err| switch (err) {
-            error.UnknownIdentifier, error.CouldNotUnify, error.InfiniteType, error.TooGeneral => {
-                try errbw.flush();
-                return 1;
-            },
-            else => {
-                return err;
-            },
-        };
-        try optimizer.optimizeStatement(statement, allocator);
-    }
+    // for (statements.items) |*statement| {
+    //     algorithmJ.checkStatement(statement.*) catch |err| switch (err) {
+    //         error.UnknownIdentifier, error.CouldNotUnify, error.InfiniteType, error.TooGeneral => {
+    //             try errbw.flush();
+    //             return 1;
+    //         },
+    //         else => {
+    //             return err;
+    //         },
+    //     };
+    //     try optimizer.optimizeStatement(statement, allocator);
+    // }
 
-    if (algorithmJ.globalTypes.get("main") == null) {
-        try errs.printError("No 'main' defined", .{});
-        try errbw.flush();
-        return 1;
-    }
+    // if (algorithmJ.globalTypes.get("main") == null) {
+    //     try errs.printError("No 'main' defined", .{});
+    //     try errbw.flush();
+    //     return 1;
+    // }
 
     for (statements.items) |statement| {
-        try statement.print(stdout.any());
+        try statement.print(stdout.any(), allocator);
         try stdout.print("\n", .{});
     }
     try bw.flush();
 
-    var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
-    var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv);
-    defer interpreter_.deinit();
-    for (statements.items) |statement| {
-        try interpreter_.runStatement(statement);
-    }
-    const result = interpreter_.lookup("main").?;
-    try value.printValue(result, stdout.any());
+    // var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
+    // var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv);
+    // defer interpreter_.deinit();
+    // for (statements.items) |statement| {
+    //     try interpreter_.runStatement(statement);
+    // }
+    // const result = interpreter_.lookup("main").?;
+    // try value.printValue(result, stdout.any());
 
-    try stdout.print(": ", .{});
+    // try stdout.print(": ", .{});
 
-    var currentTypeVar: usize = 0;
-    var typeVarMap = std.AutoHashMap(usize, usize).init(allocator);
-    defer typeVarMap.deinit();
+    // var currentTypeVar: usize = 0;
+    // var typeVarMap = std.AutoHashMap(usize, usize).init(allocator);
+    // defer typeVarMap.deinit();
 
-    const mainTypeScheme = algorithmJ.globalTypes.get("main").?;
-    var mainType: *type_inference.Type = undefined;
-    switch (mainTypeScheme.*) {
-        .type => |t| {
-            t.rc += 1;
-            mainType = t;
-        },
-        .forall => |*forall| {
-            mainType = try algorithmJ.instantiate(forall);
-        },
-    }
-    defer mainType.deinit(allocator);
-    try type_inference.printType(
-        mainType,
-        stdout.any(),
-        &currentTypeVar,
-        &typeVarMap,
-        true,
-        allocator,
-    );
-    try stdout.print("\n", .{});
+    // const mainTypeScheme = algorithmJ.globalTypes.get("main").?;
+    // var mainType: *type_inference.Type = undefined;
+    // switch (mainTypeScheme.*) {
+    //     .type => |t| {
+    //         t.rc += 1;
+    //         mainType = t;
+    //     },
+    //     .forall => |*forall| {
+    //         mainType = try algorithmJ.instantiate(forall);
+    //     },
+    // }
+    // defer mainType.deinit(allocator);
+    // try type_inference.printType(
+    //     mainType,
+    //     stdout.any(),
+    //     &currentTypeVar,
+    //     &typeVarMap,
+    //     true,
+    //     allocator,
+    // );
+    // try stdout.print("\n", .{});
 
     try bw.flush();
 
