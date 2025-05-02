@@ -356,6 +356,15 @@ pub const AlgorithmJ = struct {
             .number => |numB| {
                 return containsAndShiftDepth(typeVarA, numB.variable);
             },
+            .composite => |composite| {
+                var contains = false;
+                for (composite.args.items) |arg| {
+                    if (containsAndShiftDepth(typeVarA, arg)) {
+                        contains = true;
+                    }
+                }
+                return contains;
+            },
         }
     }
 
@@ -413,6 +422,9 @@ pub const AlgorithmJ = struct {
                         }
                     },
                     .function => {
+                        return error.CouldNotUnify;
+                    },
+                    .composite => {
                         return error.CouldNotUnify;
                     },
                 }
@@ -481,6 +493,33 @@ pub const AlgorithmJ = struct {
                     },
                 }
             },
+            .composite => |composite1| {
+                switch (typeB.data) {
+                    .typeVar => |*tV2| {
+                        if (tV2.subst) |subst| {
+                            try self.lessGeneralUnify(typeA, subst);
+                        } else {
+                            if (tV2.declaration) {
+                                return error.TooGeneral;
+                            }
+                            try addSubstitution(tV2, typeA);
+                        }
+                    },
+                    .composite => |composite2| {
+                        if (std.mem.eql(u8, composite1.name, composite2.name)) {
+                            var i: usize = 0;
+                            while (i < composite1.args.items.len) : (i += 1) {
+                                try self.lessGeneralUnify(composite1.args.items[i], composite2.args.items[i]);
+                            }
+                        } else {
+                            return error.CouldNotUnify;
+                        }
+                    },
+                    else => {
+                        return error.CouldNotUnify;
+                    },
+                }
+            },
         }
     }
 
@@ -531,6 +570,9 @@ pub const AlgorithmJ = struct {
                             },
                         }
                     },
+                    .composite => {
+                        return error.CouldNotUnify;
+                    },
                 }
             },
             .function => |functionA| {
@@ -550,6 +592,9 @@ pub const AlgorithmJ = struct {
                         }
                     },
                     .number => {
+                        return error.CouldNotUnify;
+                    },
+                    .composite => {
                         return error.CouldNotUnify;
                     },
                 }
@@ -574,6 +619,29 @@ pub const AlgorithmJ = struct {
                     },
                     .number => |numB| {
                         try self.unify(numA.variable, numB.variable);
+                    },
+                    .composite => {
+                        return error.CouldNotUnify;
+                    },
+                }
+            },
+            .composite => |composite1| {
+                switch (typeB.data) {
+                    .typeVar => {
+                        try self.unify(typeB, typeA);
+                    },
+                    .composite => |composite2| {
+                        if (std.mem.eql(u8, composite1.name, composite2.name)) {
+                            var i: usize = 0;
+                            while (i < composite1.args.items.len) : (i += 1) {
+                                try self.unify(composite1.args.items[i], composite2.args.items[i]);
+                            }
+                        } else {
+                            return error.CouldNotUnify;
+                        }
+                    },
+                    else => {
+                        return error.CouldNotUnify;
                     },
                 }
             },
@@ -630,6 +698,24 @@ pub const AlgorithmJ = struct {
                 t.data = .{ .function = .{
                     .from = fromCopied,
                     .to = try self.copyAndReplace(function.to, replacementMap, copyMap),
+                } };
+                result = t;
+            },
+            .composite => |composite| {
+                const t = try Type.init(self.allocator);
+                errdefer self.allocator.destroy(t);
+                var copiedArgs = std.ArrayList(*Type).init(self.allocator);
+                errdefer copiedArgs.deinit();
+                for (composite.args.items) |arg| {
+                    try copiedArgs.append(try self.copyAndReplace(
+                        arg,
+                        replacementMap,
+                        copyMap,
+                    ));
+                }
+                t.data = .{ .composite = .{
+                    .name = composite.name,
+                    .args = copiedArgs,
                 } };
                 result = t;
             },
@@ -693,6 +779,11 @@ pub const AlgorithmJ = struct {
             .primitive => {},
             .number => |num| {
                 try self.findFreeVars(num.variable, minDepth, currentFreeVars);
+            },
+            .composite => |composite| {
+                for (composite.args.items) |arg| {
+                    try self.findFreeVars(arg, minDepth, currentFreeVars);
+                }
             },
         }
     }
@@ -1068,6 +1159,33 @@ pub const AlgorithmJ = struct {
                 const t = try self.getLetVarType(&self.globalTypes, let.name, let.be, let.annotation);
                 errdefer deinitScheme(t, self.allocator);
                 try self.globalTypes.put(let.name.lexeme, t);
+            },
+            .type => |typeDecl| {
+                for (typeDecl.constructors.items) |constructor| {
+                    if (self.globalTypes.contains(constructor.name.lexeme)) {
+                        try self.errors.errorAt(
+                            constructor.name.start,
+                            constructor.name.end,
+                            "The name '{s}' is already used.",
+                            .{constructor.name.lexeme},
+                        );
+                    }
+                    var currentType = typeDecl.compositeType;
+                    currentType.rc += 1;
+                    errdefer currentType.deinit(self.allocator);
+                    var i: usize = constructor.args.items.len;
+                    while (i > 0) : (i -= 1) {
+                        const functionType = try Type.init(self.allocator);
+                        constructor.args.items[i - 1].rc += 1;
+                        functionType.data = .{ .function = .{
+                            .from = constructor.args.items[i - 1],
+                            .to = currentType,
+                        } };
+                        currentType = functionType;
+                    }
+                    const constructorType = try self.generalise(currentType, 0);
+                    try self.globalTypes.put(constructor.name.lexeme, constructorType);
+                }
             },
         }
     }

@@ -220,6 +220,7 @@ pub const Statement = union(enum) {
     },
     type: struct {
         name: token.Token,
+        compositeType: *Type,
         constructors: std.ArrayList(Constructor),
     },
 
@@ -240,6 +241,7 @@ pub const Statement = union(enum) {
                     constructor.args.deinit();
                 }
                 t.constructors.deinit();
+                t.compositeType.deinit(allocator);
             },
         }
     }

@@ -14,6 +14,12 @@ const InfixParseRule = struct { InfixParseFn, Precedence };
 
 const nullToken = token.Token{ .start = 0, .end = 0, .lexeme = "", .type = .Identifier };
 
+const builtinTypes = std.StaticStringMap(void).initComptime(.{
+    .{ "Int", undefined },
+    .{ "Float", undefined },
+    .{ "Bool", undefined },
+});
+
 pub const ParserError = error{
     InvalidPrefix,
     UnexpectedToken,
@@ -68,6 +74,7 @@ pub const Parser = struct {
             if (self.typeVar()) |typeVarName| {
                 const t = try type_inference.Type.init(self.allocator);
                 if (self.typeVarMap.?.get(typeVarName.lexeme)) |tV| {
+                    tV.rc += 1;
                     switch (tV.data) {
                         .typeVar => {
                             t.data = .{ .number = .{ .variable = tV } };
@@ -353,6 +360,12 @@ pub const Parser = struct {
         if (!std.ascii.isUpper(name.lexeme[0])) {
             try self.errs.errorAt(name.start, name.end, "Types must start with uppercase letters.", .{});
             return error.UnexpectedToken;
+        } else if (builtinTypes.has(name.lexeme)) {
+            try self.errs.errorAt(name.start, name.end, "The Type {s} is a builtin type.", .{name.lexeme});
+            return error.UnexpectedToken;
+        } else if (self.algorithmJ.composite.contains(name.lexeme)) {
+            try self.errs.errorAt(name.start, name.end, "The Type {s} has already been declared.", .{name.lexeme});
+            return error.UnexpectedToken;
         }
 
         self.typeVarMap = .init(self.allocator);
@@ -366,6 +379,14 @@ pub const Parser = struct {
         }
 
         var numTypeVars: usize = 0;
+        var typeArgs = std.ArrayList(*type_inference.Type).init(self.allocator);
+        errdefer {
+            for (typeArgs.items) |t| {
+                t.deinit(self.allocator);
+            }
+            typeArgs.deinit();
+        }
+
         while (self.typeVar()) |typeVarArg| {
             numTypeVars += 1;
             if (self.typeVarMap.?.contains(typeVarArg.lexeme)) {
@@ -376,6 +397,8 @@ pub const Parser = struct {
             tV.* = self.algorithmJ.newVarT();
             errdefer tV.deinit(self.allocator);
             try self.typeVarMap.?.put(typeVarArg.lexeme, tV);
+            try typeArgs.append(tV);
+            tV.rc += 1;
         }
 
         try self.algorithmJ.composite.put(name.lexeme, numTypeVars);
@@ -420,8 +443,15 @@ pub const Parser = struct {
             }
         }
 
+        var compositeType = try type_inference.Type.init(self.allocator);
+        compositeType.data = .{ .composite = .{
+            .name = name.lexeme,
+            .args = typeArgs,
+        } };
+
         return .{ .type = .{
             .name = name,
+            .compositeType = compositeType,
             .constructors = constructors,
         } };
     }

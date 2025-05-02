@@ -242,6 +242,10 @@ pub const Errors = struct {
                             else => {},
                         }
                     },
+                    .composite => {
+                        try self.printType(leftType, leftWriter, currentTypeVar, true, topLevel);
+                        try self.printType(rightType, rightWriter, currentTypeVar, true, topLevel);
+                    },
                 }
             },
             .typeVar => |tV1| {
@@ -323,6 +327,52 @@ pub const Errors = struct {
                         try self.compareTypes(num1.variable, rightType, leftWriter, rightWriter, currentTypeVar, topLevel);
                     },
                     else => {},
+                }
+            },
+            .composite => |composite1| {
+                switch (rightType.data) {
+                    .typeVar => |tV2| {
+                        if (tV2.subst) |subst| {
+                            try self.compareTypes(leftType, subst, leftWriter, rightWriter, currentTypeVar, topLevel);
+                        } else {
+                            try self.printType(leftType, leftWriter, currentTypeVar, false, topLevel);
+                            try self.printType(rightType, rightWriter, currentTypeVar, false, topLevel);
+                        }
+                    },
+                    .composite => |composite2| {
+                        if (!std.mem.eql(u8, composite1.name, composite2.name)) {
+                            try self.printType(leftType, leftWriter, currentTypeVar, true, topLevel);
+                            try self.printType(rightType, rightWriter, currentTypeVar, true, topLevel);
+                        } else {
+                            if (!topLevel) {
+                                try leftWriter.print("(", .{});
+                                try rightWriter.print("(", .{});
+                            }
+                            try leftWriter.print("{s}", .{composite1.name});
+                            try rightWriter.print("{s}", .{composite2.name});
+                            var i: usize = 0;
+                            while (i < composite1.args.items.len) : (i += 1) {
+                                try leftWriter.print(" ", .{});
+                                try rightWriter.print(" ", .{});
+                                try self.compareTypes(
+                                    composite1.args.items[i],
+                                    composite2.args.items[i],
+                                    leftWriter,
+                                    rightWriter,
+                                    currentTypeVar,
+                                    false,
+                                );
+                            }
+                            if (!topLevel) {
+                                try leftWriter.print(")", .{});
+                                try rightWriter.print(")", .{});
+                            }
+                        }
+                    },
+                    else => {
+                        try self.printType(leftType, leftWriter, currentTypeVar, true, topLevel);
+                        try self.printType(rightType, rightWriter, currentTypeVar, true, topLevel);
+                    },
                 }
             },
         }

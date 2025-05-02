@@ -224,5 +224,6 @@ pub fn optimizeStatement(statement: *Statement, allocator: std.mem.Allocator) !v
             try OptimizeClosures.run(let.be, allocator);
             //try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
         },
+        .type => {},
     }
 }
