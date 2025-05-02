@@ -4,22 +4,38 @@ const Value = @import("./value.zig").Value;
 const AST = @import("./ast.zig").AST;
 const Env = @import("./interpreter.zig").Env;
 
+pub const Code = union(enum) {
+    ast: *AST,
+    constructor: Constructor,
+};
+
 pub const Closure = struct {
     argName: token.Token,
     bound: std.StringHashMap(Value),
-    code: *AST,
+    code: Code,
 };
 
 pub const MultiArgClosure = struct {
     argNames: std.ArrayList(token.Token),
     bound: std.StringHashMap(Value),
-    code: *AST,
+    code: Code,
+};
+
+pub const Constructor = struct {
+    numArgs: usize,
+    name: []const u8,
+};
+
+pub const Construct = struct {
+    name: []const u8,
+    values: std.ArrayList(Value),
 };
 
 pub const ObjectContent = union(enum) {
     closure: Closure,
     multiArgClosure: MultiArgClosure,
     recurse: ?Value,
+    construct: Construct,
 };
 
 const GCStressTest: bool = false;
@@ -39,6 +55,9 @@ pub const Object = struct {
                 multiClos.bound.deinit();
                 multiClos.argNames.deinit();
             },
+            .construct => |construct| {
+                construct.values.deinit();
+            },
             else => {},
         }
         allocator.destroy(self);
@@ -49,6 +68,7 @@ pub const Object = struct {
             .closure => "Closure",
             .multiArgClosure => "MultiArgumentClosure",
             .recurse => "Recurse",
+            .construct => "Construct",
         };
     }
 };
@@ -97,6 +117,7 @@ pub const Objects = struct {
                         }
                     }
                 },
+                .construct => {},
             }
         }
     }
@@ -179,7 +200,7 @@ pub const Objects = struct {
         return object;
     }
 
-    pub fn makeClosure(self: *Objects, argName: token.Token, bound: std.StringHashMap(Value), code: *AST) !*Object {
+    pub fn makeClosure(self: *Objects, argName: token.Token, bound: std.StringHashMap(Value), code: Code) !*Object {
         const object = try self.makeObject();
         object.content = .{ .closure = .{
             .argName = argName,
@@ -189,7 +210,7 @@ pub const Objects = struct {
         return object;
     }
 
-    pub fn makeMultiArgClosure(self: *Objects, argNames: std.ArrayList(token.Token), bound: std.StringHashMap(Value), code: *AST) !*Object {
+    pub fn makeMultiArgClosure(self: *Objects, argNames: std.ArrayList(token.Token), bound: std.StringHashMap(Value), code: Code) !*Object {
         const object = try self.makeObject();
         object.content = .{ .multiArgClosure = .{
             .argNames = argNames,
@@ -202,6 +223,24 @@ pub const Objects = struct {
     pub fn makeRecurse(self: *Objects) !*Object {
         const object = try self.makeObject();
         object.content = .{ .recurse = null };
+        return object;
+    }
+
+    pub fn makeConstructor(self: *Objects, name: []const u8, numArgs: usize) !*Object {
+        const object = try self.makeObject();
+        object.content = .{ .constructor = .{
+            .numArgs = numArgs,
+            .name = name,
+        } };
+        return object;
+    }
+
+    pub fn makeConstruct(self: *Objects, name: []const u8, values: std.ArrayList(Value)) !*Object {
+        const object = try self.makeObject();
+        object.content = .{ .construct = .{
+            .values = values,
+            .name = name,
+        } };
         return object;
     }
 };

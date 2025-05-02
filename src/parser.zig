@@ -12,8 +12,6 @@ const PrefixParseFn = *const fn (self: *Parser) anyerror!*AST;
 const InfixParseFn = *const fn (self: *Parser, left: *AST) anyerror!*AST;
 const InfixParseRule = struct { InfixParseFn, Precedence };
 
-const nullToken = token.Token{ .start = 0, .end = 0, .lexeme = "", .type = .Identifier };
-
 const builtinTypes = std.StaticStringMap(void).initComptime(.{
     .{ "Int", undefined },
     .{ "Float", undefined },

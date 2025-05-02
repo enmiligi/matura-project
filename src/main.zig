@@ -104,11 +104,11 @@ pub fn main() !u8 {
         try optimizer.optimizeStatement(statement, allocator);
     }
 
-    // if (algorithmJ.globalTypes.get("main") == null) {
-    //     try errs.printError("No 'main' defined", .{});
-    //     try errbw.flush();
-    //     return 1;
-    // }
+    if (algorithmJ.globalTypes.get("main") == null) {
+        try errs.printError("No 'main' defined", .{});
+        try errbw.flush();
+        return 1;
+    }
 
     for (statements.items) |statement| {
         try statement.print(stdout.any(), allocator);
@@ -116,16 +116,16 @@ pub fn main() !u8 {
     }
     try bw.flush();
 
-    // var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
-    // var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv);
-    // defer interpreter_.deinit();
-    // for (statements.items) |statement| {
-    //     try interpreter_.runStatement(statement);
-    // }
-    // const result = interpreter_.lookup("main").?;
-    // try value.printValue(result, stdout.any());
+    var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
+    var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv);
+    defer interpreter_.deinit();
+    for (statements.items) |statement| {
+        try interpreter_.runStatement(statement);
+    }
+    const result = interpreter_.lookup("main").?;
+    try value.printValue(result, stdout.any());
 
-    // try stdout.print(": ", .{});
+    try stdout.print(": ", .{});
 
     var currentTypeVar: usize = 0;
     var typeVarMap = std.AutoHashMap(usize, usize).init(allocator);

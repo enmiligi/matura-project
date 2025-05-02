@@ -38,6 +38,29 @@ pub fn printValue(value: Value, writer: std.io.AnyWriter) !void {
                         try writer.print("Value used before defined", .{});
                     }
                 },
+                .construct => |construct| {
+                    try writer.print("{s}", .{construct.name});
+                    for (construct.values.items) |val| {
+                        switch (val) {
+                            .object => |obj2| {
+                                switch (obj2.content) {
+                                    .construct => |construct2| {
+                                        if (construct2.values.items.len > 0) {
+                                            try writer.print(" (", .{});
+                                            try printValue(val, writer);
+                                            try writer.print(")", .{});
+                                            continue;
+                                        }
+                                    },
+                                    else => {},
+                                }
+                            },
+                            else => {},
+                        }
+                        try writer.print(" ", .{});
+                        try printValue(val, writer);
+                    }
+                },
             }
         },
     }
