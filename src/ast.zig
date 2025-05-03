@@ -9,6 +9,32 @@ pub const TypeAnnotation = struct {
     region: Region,
 };
 
+pub const Pattern = union(enum) {
+    constructor: struct {
+        name: token.Token,
+        values: std.ArrayList(token.Token),
+    },
+
+    pub fn print(self: *Pattern, writer: std.io.AnyWriter) !void {
+        switch (self.*) {
+            .constructor => |constructor| {
+                try writer.print("{s}", .{constructor.name.lexeme});
+                for (constructor.values.items) |value| {
+                    try writer.print(" {s}", .{value.lexeme});
+                }
+            },
+        }
+    }
+
+    pub fn deinit(self: *Pattern) void {
+        switch (self.*) {
+            .constructor => |constructor| {
+                constructor.values.deinit();
+            },
+        }
+    }
+};
+
 pub const AST = union(enum) {
     let: struct {
         start: usize,
@@ -68,6 +94,12 @@ pub const AST = union(enum) {
         token: token.Token,
         expr: *AST,
     },
+    case: struct {
+        start: usize,
+        value: *AST,
+        patterns: std.ArrayList(Pattern),
+        bodies: std.ArrayList(*AST),
+    },
 
     // Recursively destroy all contained ASTs
     pub fn deinit(self: *AST, allocator: std.mem.Allocator) void {
@@ -115,6 +147,17 @@ pub const AST = union(enum) {
             },
             .prefixOp => |prefixOp| {
                 prefixOp.expr.deinit(allocator);
+            },
+            .case => |case| {
+                case.value.deinit(allocator);
+                for (case.patterns.items) |*pattern| {
+                    pattern.deinit();
+                }
+                case.patterns.deinit();
+                for (case.bodies.items) |body| {
+                    body.deinit(allocator);
+                }
+                case.bodies.deinit();
             },
             else => {},
         }
@@ -202,6 +245,18 @@ pub const AST = union(enum) {
                 try writer.print("({s}", .{prefixOp.token.lexeme});
                 try prefixOp.expr.print(writer);
                 try writer.print(")", .{});
+            },
+            .case => |case| {
+                try writer.print("Case(value: ", .{});
+                try case.value.print(writer);
+                try writer.print(", of: [", .{});
+                for (case.patterns.items, 0..) |*pattern, i| {
+                    try pattern.print(writer);
+                    if (i != case.patterns.items.len - 1) {
+                        try writer.print(", ", .{});
+                    }
+                }
+                try writer.print("])", .{});
             },
         }
     }

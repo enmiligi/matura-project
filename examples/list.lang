@@ -1,3 +1,5 @@
 type List a = Cons a (List a) | Nil
 
-let main = Cons 5 Nil
+let main = case Cons 5 Nil of
+    Cons a rest => rest
+  | Nil => Nil

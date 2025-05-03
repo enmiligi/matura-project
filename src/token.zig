@@ -31,6 +31,9 @@ pub const TokenType = enum {
     // Type declaration
     Type,
     VBar,
+    // Pattern matching
+    Case,
+    Of,
 };
 
 pub fn formatTokenType(tt: TokenType) []const u8 {
@@ -58,6 +61,8 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .Comma => "','",
         .Type => "'type'",
         .VBar => "'|'",
+        .Case => "'case'",
+        .Of => "'of'",
     };
     return name;
 }

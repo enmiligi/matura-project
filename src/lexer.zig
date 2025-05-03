@@ -19,6 +19,8 @@ const identifierMap =
         .{ "then", .Then },
         .{ "else", .Else },
         .{ "type", .Type },
+        .{ "case", .Case },
+        .{ "of", .Of },
     });
 
 pub const Lexer = struct {

@@ -1,9 +1,11 @@
 const std = @import("std");
 const token = @import("./token.zig");
 const lexer = @import("./lexer.zig");
-const AST = @import("./ast.zig").AST;
-const TypeAnnotation = @import("./ast.zig").TypeAnnotation;
-const Statement = @import("./ast.zig").Statement;
+const _ast = @import("./ast.zig");
+const AST = _ast.AST;
+const TypeAnnotation = _ast.TypeAnnotation;
+const Statement = _ast.Statement;
+const Pattern = _ast.Pattern;
 const errors = @import("./errors.zig");
 const type_inference = @import("./type_inference.zig");
 
@@ -242,7 +244,13 @@ pub const Parser = struct {
                 },
                 .EOF => {},
                 else => {
-                    _ = try self.expectToken(.NewStatement);
+                    try self.errs.errorAt(
+                        self.peekToken().start,
+                        self.peekToken().end,
+                        "Didn't expect {s}.",
+                        .{token.formatTokenType(self.peekToken().type)},
+                    );
+                    return error.UnexpectedToken;
                 },
             }
         }
@@ -654,6 +662,65 @@ pub const Parser = struct {
         return ifAST;
     }
 
+    fn pattern(self: *Parser) !Pattern {
+        if (self.peekToken().type == .Identifier) {
+            const constructorName = try self.getToken();
+            var args = std.ArrayList(token.Token).init(self.allocator);
+            while (self.peekToken().type == .Identifier) {
+                try args.append(try self.getToken());
+            }
+            return .{ .constructor = .{
+                .name = constructorName,
+                .values = args,
+            } };
+        }
+        try self.errs.errorAt(
+            self.peekToken().start,
+            self.peekToken().end,
+            "Expected a pattern.",
+            .{},
+        );
+        return error.UnexpectedToken;
+    }
+
+    fn caseExpr(self: *Parser) !*AST {
+        const start = (try self.getToken()).start;
+        const value = try self.expression(0);
+        errdefer value.deinit(self.allocator);
+        _ = try self.expectToken(.Of);
+        var patterns = std.ArrayList(Pattern).init(self.allocator);
+        errdefer {
+            for (patterns.items) |*currentPattern| {
+                currentPattern.deinit();
+            }
+            patterns.deinit();
+        }
+        var bodies = std.ArrayList(*AST).init(self.allocator);
+        errdefer {
+            for (bodies.items) |body| {
+                body.deinit(self.allocator);
+            }
+            bodies.deinit();
+        }
+        try patterns.append(try self.pattern());
+        _ = try self.expectToken(.DoubleArrow);
+        try bodies.append(try self.expression(0));
+        while (self.peekToken().type == .VBar) {
+            _ = try self.getToken();
+            try patterns.append(try self.pattern());
+            _ = try self.expectToken(.DoubleArrow);
+            try bodies.append(try self.expression(0));
+        }
+        const caseAST = try self.allocator.create(AST);
+        caseAST.* = .{ .case = .{
+            .start = start,
+            .value = value,
+            .patterns = patterns,
+            .bodies = bodies,
+        } };
+        return caseAST;
+    }
+
     fn prefixOp(self: *Parser) !*AST {
         const t = try self.getToken();
         const prec: usize = switch (t.lexeme[0]) {
@@ -679,6 +746,7 @@ pub const Parser = struct {
             token.TokenType.Let => letExpression,
             token.TokenType.Lambda => lambda,
             token.TokenType.If => ifExpr,
+            token.TokenType.Case => caseExpr,
             token.TokenType.Operator => {
                 if (self.peekToken().lexeme.len == 1 and
                     (self.peekToken().lexeme[0] == '-' or self.peekToken().lexeme[0] == '!'))
