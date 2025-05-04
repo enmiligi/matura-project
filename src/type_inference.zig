@@ -46,6 +46,9 @@ pub const Type = struct {
     }
 
     pub fn deinit(self: *Type, allocator: std.mem.Allocator) void {
+        if (self.rc == 0) {
+            std.debug.print("{any}", .{self});
+        }
         self.rc -= 1;
         if (self.rc == 0) {
             switch (self.data) {
@@ -127,6 +130,11 @@ fn collectConstraintsAndTypeVars(
                     const varNum = typeVarMap.get(num.variable.data.typeVar.n).?;
                     try constraints.put(num.variable, .{ .name = "Number", .typeVar = varNum });
                 }
+            }
+        },
+        .composite => |composite| {
+            for (composite.args.items) |arg| {
+                try collectConstraintsAndTypeVars(arg, constraints, typeVarMap, currentTypeVar, allocator);
             }
         },
         else => {
@@ -295,7 +303,12 @@ pub const AlgorithmJ = struct {
     errors: *Errors,
 
     globalTypes: TypeEnv,
-    composite: std.StringHashMap(usize),
+    composite: std.StringHashMap(struct {
+        numVars: usize,
+        constructors: ?std.StringArrayHashMap(bool),
+        compositeType: ?*Type,
+    }),
+    constructorToType: std.StringHashMap([]const u8),
 
     pub fn init(allocator: std.mem.Allocator, errs: *Errors) AlgorithmJ {
         return .{
@@ -303,13 +316,24 @@ pub const AlgorithmJ = struct {
             .errors = errs,
             .globalTypes = .init(allocator),
             .composite = .init(allocator),
+            .constructorToType = .init(allocator),
         };
     }
 
     pub fn deinit(self: *AlgorithmJ) void {
         deinitTypeEnv(&self.globalTypes, self.allocator);
         self.globalTypes.deinit();
+        var compIter = self.composite.valueIterator();
+        while (compIter.next()) |compType| {
+            if (compType.constructors) |*constructors| {
+                constructors.deinit();
+            }
+            if (compType.compositeType) |comp| {
+                comp.deinit(self.allocator);
+            }
+        }
         self.composite.deinit();
+        self.constructorToType.deinit();
     }
 
     pub fn getType(self: *AlgorithmJ, expr: *AST) !*Type {
@@ -722,6 +746,7 @@ pub const AlgorithmJ = struct {
         }
         errdefer result.deinit(self.allocator);
         try copyMap.put(inputType, result);
+        result.rc += 1;
         return result;
     }
 
@@ -752,7 +777,13 @@ pub const AlgorithmJ = struct {
             instantiatedVars.deinit();
         }
         var copyMap = std.AutoHashMap(*Type, *Type).init(self.allocator);
-        defer copyMap.deinit();
+        defer {
+            var copyMapIter = copyMap.valueIterator();
+            while (copyMapIter.next()) |copyType| {
+                copyType.*.deinit(self.allocator);
+            }
+            copyMap.deinit();
+        }
         return try self.copyAndReplace(forall.type, &instantiatedVars, &copyMap);
     }
 
@@ -1081,9 +1112,14 @@ pub const AlgorithmJ = struct {
                     typeScheme = try self.allocator.create(TypeScheme);
                 }
                 typeScheme.* = .{ .type = newTypeVar };
-                const previous = typeEnv.get(lambda.argname.lexeme);
-                if (previous) |pT| {
-                    errdefer deinitScheme(pT, self.allocator);
+                if (typeEnv.contains(lambda.argname.lexeme)) {
+                    try self.errors.errorAt(
+                        lambda.argname.start,
+                        lambda.argname.end,
+                        "This name shadows another variable.",
+                        .{},
+                    );
+                    return error.CouldNotUnify;
                 }
                 {
                     errdefer self.allocator.destroy(typeScheme);
@@ -1094,11 +1130,7 @@ pub const AlgorithmJ = struct {
                 errdefer returnType.deinit(self.allocator);
                 self.allocator.destroy(typeScheme);
                 errdefer newTypeVar.deinit(self.allocator);
-                if (previous) |previousType| {
-                    try typeEnv.put(lambda.argname.lexeme, previousType);
-                } else {
-                    _ = typeEnv.remove(lambda.argname.lexeme);
-                }
+                _ = typeEnv.remove(lambda.argname.lexeme);
                 t.data = .{ .function = .{
                     .from = newTypeVar,
                     .to = returnType,
@@ -1128,21 +1160,214 @@ pub const AlgorithmJ = struct {
             },
             .let => |let| {
                 self.allocator.destroy(t);
-                const previous = typeEnv.get(let.name.lexeme);
-                errdefer if (previous) |pT| {
-                    deinitScheme(pT, self.allocator);
-                };
+                if (self.globalTypes.contains(let.name.lexeme)) {
+                    try self.errors.errorAt(
+                        let.name.start,
+                        let.name.end,
+                        "This name is used for a global variable.",
+                        .{},
+                    );
+                    return error.CouldNotUnify;
+                }
+                if (typeEnv.contains(let.name.lexeme)) {
+                    try self.errors.errorAt(
+                        let.name.start,
+                        let.name.end,
+                        "This name shadows another variable.",
+                        .{},
+                    );
+                    return error.CouldNotUnify;
+                }
                 const generalised = try self.getLetVarType(typeEnv, let.name, let.be, let.type);
                 try typeEnv.put(let.name.lexeme, generalised);
                 const typeOfExpr = try self.run(typeEnv, let.in);
                 errdefer typeOfExpr.deinit(self.allocator);
-                if (previous) |previousType| {
-                    try typeEnv.put(let.name.lexeme, previousType);
-                } else {
-                    _ = typeEnv.remove(let.name.lexeme);
-                }
+                _ = typeEnv.remove(let.name.lexeme);
                 deinitScheme(generalised, self.allocator);
                 return typeOfExpr;
+            },
+            .case => |case| {
+                self.allocator.destroy(t);
+                const typeOfValue = try self.run(typeEnv, case.value);
+                defer typeOfValue.deinit(self.allocator);
+                var type_: ?[]const u8 = null;
+                for (case.patterns.items) |pattern| {
+                    if (self.constructorToType.get(pattern.name.lexeme)) |constructorType| {
+                        if (type_ != null and !std.mem.eql(u8, type_.?, constructorType)) {
+                            try self.errors.errorAt(
+                                pattern.name.start,
+                                pattern.name.end,
+                                "This constructor belongs to the type '{s}',\nbut the previous patterns belong to the type '{s}'.",
+                                .{ constructorType, type_.? },
+                            );
+                            return error.CouldNotUnify;
+                        }
+                        type_ = constructorType;
+                    }
+                }
+                var composite = self.composite.getPtr(type_.?).?;
+
+                for (composite.constructors.?.values()) |*constructor| {
+                    constructor.* = false;
+                }
+                var instantiatedVars = std.AutoHashMap(usize, *Type).init(self.allocator);
+
+                const args = composite.compositeType.?.data.composite.args;
+                {
+                    errdefer {
+                        var instIterator = instantiatedVars.iterator();
+                        while (instIterator.next()) |entry| {
+                            self.allocator.destroy(entry.value_ptr.*);
+                        }
+                    }
+                    for (args.items) |arg| {
+                        const varT = try self.allocator.create(Type);
+                        errdefer self.allocator.destroy(varT);
+                        varT.* = self.newVarT();
+                        try instantiatedVars.put(arg.data.typeVar.n, varT);
+                    }
+                }
+                defer {
+                    var instIterator = instantiatedVars.iterator();
+                    while (instIterator.next()) |entry| {
+                        entry.value_ptr.*.deinit(self.allocator);
+                    }
+                    instantiatedVars.deinit();
+                }
+
+                var copyMap = std.AutoHashMap(*Type, *Type).init(self.allocator);
+                defer {
+                    var copyMapIter = copyMap.iterator();
+                    while (copyMapIter.next()) |copyType| {
+                        copyType.value_ptr.*.deinit(self.allocator);
+                    }
+                    copyMap.deinit();
+                }
+
+                const copiedCompositeType = try self.copyAndReplace(composite.compositeType.?, &instantiatedVars, &copyMap);
+                //copiedCompositeType.rc += 1;
+                defer copiedCompositeType.deinit(self.allocator);
+                self.unify(typeOfValue, copiedCompositeType) catch |err| switch (err) {
+                    error.CouldNotUnify => {
+                        try self.errors.typeComparison(
+                            computeBoundaries(case.value),
+                            typeOfValue,
+                            copiedCompositeType,
+                            "These types should be the same",
+                            "the value is matched with this constructor.",
+                            computeBoundaries(case.bodies.items[0]),
+                        );
+                        return err;
+                    },
+                    error.InfiniteType => {
+                        try self.errors.typeComparison(
+                            computeBoundaries(case.value),
+                            typeOfValue,
+                            copiedCompositeType,
+                            "leads to an infinite type\nwhen combined with the type of this",
+                            "the value is matched with this constructor.",
+                            computeBoundaries(case.bodies.items[0]),
+                        );
+                        return err;
+                    },
+                };
+
+                const resultType = try Type.init(self.allocator);
+                resultType.* = self.newVarT();
+                errdefer resultType.deinit(self.allocator);
+                for (case.patterns.items, case.bodies.items) |pattern, body| {
+                    if (composite.constructors.?.get(pattern.name.lexeme).?) {
+                        try self.errors.errorAt(
+                            pattern.name.start,
+                            pattern.name.end,
+                            "This constructor has already been matched.",
+                            .{},
+                        );
+                        return error.CouldNotUnify;
+                    } else {
+                        composite.constructors.?.getPtr(pattern.name.lexeme).?.* = true;
+                        const constructorType = switch (self.globalTypes.get(pattern.name.lexeme).?.*) {
+                            .forall => |forall| forall.type,
+                            .type => |exactType| exactType,
+                        };
+                        const substitutedType = try self.copyAndReplace(constructorType, &instantiatedVars, &copyMap);
+                        defer substitutedType.deinit(self.allocator);
+                        var constrType = substitutedType;
+                        for (pattern.values.items) |value| {
+                            switch (constrType.data) {
+                                .composite => {
+                                    try self.errors.errorAt(
+                                        pattern.name.start,
+                                        pattern.name.end,
+                                        "Too many arguments given to the constructor.",
+                                        .{},
+                                    );
+                                },
+                                .function => |func| {
+                                    if (self.globalTypes.contains(value.lexeme)) {
+                                        try self.errors.errorAt(
+                                            value.start,
+                                            value.end,
+                                            "This name is used for a global variable.",
+                                            .{},
+                                        );
+                                        return error.CouldNotUnify;
+                                    }
+                                    if (typeEnv.contains(value.lexeme)) {
+                                        try self.errors.errorAt(
+                                            value.start,
+                                            value.end,
+                                            "This name shadows another variable.",
+                                            .{},
+                                        );
+                                        return error.CouldNotUnify;
+                                    }
+                                    const valueScheme = try self.allocator.create(TypeScheme);
+                                    errdefer self.allocator.destroy(valueScheme);
+
+                                    valueScheme.* = .{ .type = func.from };
+                                    func.from.rc += 1;
+                                    try typeEnv.put(value.lexeme, valueScheme);
+                                    constrType = func.to;
+                                },
+                                else => {
+                                    unreachable;
+                                },
+                            }
+                        }
+                        const bodyType = try self.run(typeEnv, body);
+                        defer bodyType.deinit(self.allocator);
+                        for (pattern.values.items) |value| {
+                            deinitScheme(typeEnv.get(value.lexeme).?, self.allocator);
+                            _ = typeEnv.remove(value.lexeme);
+                        }
+                        self.unify(resultType, bodyType) catch |err| switch (err) {
+                            error.CouldNotUnify => {
+                                try self.errors.typeComparison(
+                                    computeBoundaries(body),
+                                    bodyType,
+                                    resultType,
+                                    "These types should be the same",
+                                    "they are from the same pattern match.",
+                                    computeBoundaries(case.bodies.items[0]),
+                                );
+                                return err;
+                            },
+                            error.InfiniteType => {
+                                try self.errors.typeComparison(
+                                    computeBoundaries(body),
+                                    bodyType,
+                                    resultType,
+                                    "leads to an infinite type\nwhen combined with the type of this",
+                                    "they are from the same pattern match:",
+                                    computeBoundaries(case.bodies.items[0]),
+                                );
+                                return err;
+                            },
+                        };
+                    }
+                }
+                return resultType;
             },
             .lambdaMult => {},
             .callMult => {},
@@ -1185,6 +1410,7 @@ pub const AlgorithmJ = struct {
                     }
                     const constructorType = try self.generalise(currentType, 0);
                     try self.globalTypes.put(constructor.name.lexeme, constructorType);
+                    try self.constructorToType.put(constructor.name.lexeme, typeDecl.name.lexeme);
                 }
             },
         }

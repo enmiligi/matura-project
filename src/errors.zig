@@ -95,14 +95,10 @@ pub const Errors = struct {
             .case => |case| {
                 const lastPattern = case.patterns.items[case.patterns.items.len - 1];
                 var end: usize = undefined;
-                switch (lastPattern) {
-                    .constructor => |constructor| {
-                        if (constructor.values.items.len == 0) {
-                            end = constructor.name.end;
-                        } else {
-                            end = constructor.values.items[constructor.values.items.len - 1].end;
-                        }
-                    },
+                if (lastPattern.values.items.len == 0) {
+                    end = lastPattern.name.end;
+                } else {
+                    end = lastPattern.values.items[lastPattern.values.items.len - 1].end;
                 }
                 return .{ .start = case.start, .end = end };
             },

@@ -49,6 +49,12 @@ pub const OptimizeClosures = struct {
                     _ = exclude.remove(lambda.argname.lexeme);
                 }
             },
+            .case => |case| {
+                try findEnclosed(case.value, found, exclude);
+                for (case.bodies.items) |body| {
+                    try findEnclosed(body, found, exclude);
+                }
+            },
             .lambdaMult => {},
             .callMult => {},
         }
@@ -86,6 +92,12 @@ pub const OptimizeClosures = struct {
             },
             .prefixOp => |prefixOp| {
                 try run(prefixOp.expr, allocator);
+            },
+            .case => |case| {
+                try run(case.value, allocator);
+                for (case.bodies.items) |body| {
+                    try run(body, allocator);
+                }
             },
             .lambdaMult => {},
             .callMult => {},
@@ -211,6 +223,12 @@ pub const OptimizeFullyInstantiatedCalls = struct {
             },
             .prefixOp => |prefixOp| {
                 try run(prefixOp.expr, allocator);
+            },
+            .case => |case| {
+                try run(case.value, allocator);
+                for (case.bodies.items) |body| {
+                    try run(body, allocator);
+                }
             },
             .lambdaMult => {},
             .callMult => {},

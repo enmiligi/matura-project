@@ -159,8 +159,8 @@ pub const Parser = struct {
                 currentType.data = .{ .primitive = .Float };
             } else if (std.mem.eql(u8, tN.lexeme, "Bool")) {
                 currentType.data = .{ .primitive = .Bool };
-            } else if (self.algorithmJ.composite.get(tN.lexeme)) |numArgs| {
-                if (numArgs > 0 and !callPrecedence) {
+            } else if (self.algorithmJ.composite.get(tN.lexeme)) |compositeType| {
+                if (compositeType.numVars > 0 and !callPrecedence) {
                     try self.errs.errorAt(
                         tN.start,
                         tN.end,
@@ -177,13 +177,19 @@ pub const Parser = struct {
                     args.deinit();
                 }
                 var i: usize = 0;
-                while (i < numArgs) : (i += 1) {
+                while (i < compositeType.numVars) : (i += 1) {
                     var _region: errors.Region = .{ .start = 0, .end = 0 };
                     const arg = try self.typeExpr(&_region, declaredVars, false);
                     try args.append(arg);
                 }
                 currentType.data = .{ .composite = .{ .name = tN.lexeme, .args = args } };
             } else {
+                try self.errs.errorAt(
+                    tN.start,
+                    tN.end,
+                    "The type {s} does not exist.",
+                    .{tN.lexeme},
+                );
                 return error.InvalidType;
             }
         } else if (self.peekToken().type == .LeftParen) {
@@ -407,7 +413,11 @@ pub const Parser = struct {
             tV.rc += 1;
         }
 
-        try self.algorithmJ.composite.put(name.lexeme, numTypeVars);
+        try self.algorithmJ.composite.put(name.lexeme, .{
+            .numVars = numTypeVars,
+            .constructors = null,
+            .compositeType = null,
+        });
 
         _ = try self.expectToken(.Equal);
 
@@ -421,9 +431,12 @@ pub const Parser = struct {
             }
             constructors.deinit();
         }
+        var constructorMap = std.StringArrayHashMap(bool).init(self.allocator);
+        errdefer constructorMap.deinit();
         var c = try self.constructor();
         if (c) |constructor_| {
             try constructors.append(constructor_);
+            try constructorMap.put(constructor_.name.lexeme, false);
         } else {
             try self.errs.errorAt(
                 self.peekToken().start,
@@ -438,6 +451,7 @@ pub const Parser = struct {
             c = try self.constructor();
             if (c) |constructor_| {
                 try constructors.append(constructor_);
+                try constructorMap.put(constructor_.name.lexeme, false);
             } else {
                 try self.errs.errorAt(
                     self.peekToken().start,
@@ -454,6 +468,10 @@ pub const Parser = struct {
             .name = name.lexeme,
             .args = typeArgs,
         } };
+        compositeType.rc += 1;
+
+        self.algorithmJ.composite.getPtr(name.lexeme).?.constructors = constructorMap;
+        self.algorithmJ.composite.getPtr(name.lexeme).?.compositeType = compositeType;
 
         return .{ .type = .{
             .name = name,
@@ -669,10 +687,10 @@ pub const Parser = struct {
             while (self.peekToken().type == .Identifier) {
                 try args.append(try self.getToken());
             }
-            return .{ .constructor = .{
+            return .{
                 .name = constructorName,
                 .values = args,
-            } };
+            };
         }
         try self.errs.errorAt(
             self.peekToken().start,

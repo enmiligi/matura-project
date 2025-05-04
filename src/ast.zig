@@ -9,29 +9,19 @@ pub const TypeAnnotation = struct {
     region: Region,
 };
 
-pub const Pattern = union(enum) {
-    constructor: struct {
-        name: token.Token,
-        values: std.ArrayList(token.Token),
-    },
+pub const Pattern = struct {
+    name: token.Token,
+    values: std.ArrayList(token.Token),
 
     pub fn print(self: *Pattern, writer: std.io.AnyWriter) !void {
-        switch (self.*) {
-            .constructor => |constructor| {
-                try writer.print("{s}", .{constructor.name.lexeme});
-                for (constructor.values.items) |value| {
-                    try writer.print(" {s}", .{value.lexeme});
-                }
-            },
+        try writer.print("{s}", .{self.name.lexeme});
+        for (self.values.items) |value| {
+            try writer.print(" {s}", .{value.lexeme});
         }
     }
 
     pub fn deinit(self: *Pattern) void {
-        switch (self.*) {
-            .constructor => |constructor| {
-                constructor.values.deinit();
-            },
-        }
+        self.values.deinit();
     }
 };
 
