@@ -292,6 +292,7 @@ pub const InferenceError = error{
     InfiniteType,
     UnknownIdentifier,
     TooGeneral,
+    NonExhaustiveMatch,
 };
 
 // The struct containing all global data used for Algorithm J
@@ -393,6 +394,28 @@ pub const AlgorithmJ = struct {
     }
 
     fn addSubstitution(typeVarA: *TypeVar, typeB: *Type) !void {
+        var typeToSubstitute = typeB;
+        var substituted = true;
+        while (substituted) {
+            substituted = false;
+            switch (typeToSubstitute.data) {
+                .typeVar => |typeVarB| {
+                    if (typeVarB.subst) |sub| {
+                        typeToSubstitute = sub;
+                        substituted = true;
+                    }
+                },
+                else => {},
+            }
+        }
+        switch (typeToSubstitute.data) {
+            .typeVar => |typeVarB| {
+                if (typeVarB.n == typeVarA.n) {
+                    return;
+                }
+            },
+            else => {},
+        }
         if (containsAndShiftDepth(typeVarA, typeB)) {
             return error.InfiniteType;
         }
@@ -1207,9 +1230,6 @@ pub const AlgorithmJ = struct {
                 }
                 var composite = self.composite.getPtr(type_.?).?;
 
-                for (composite.constructors.?.values()) |*constructor| {
-                    constructor.* = false;
-                }
                 var instantiatedVars = std.AutoHashMap(usize, *Type).init(self.allocator);
 
                 const args = composite.compositeType.?.data.composite.args;
@@ -1245,7 +1265,6 @@ pub const AlgorithmJ = struct {
                 }
 
                 const copiedCompositeType = try self.copyAndReplace(composite.compositeType.?, &instantiatedVars, &copyMap);
-                //copiedCompositeType.rc += 1;
                 defer copiedCompositeType.deinit(self.allocator);
                 self.unify(typeOfValue, copiedCompositeType) catch |err| switch (err) {
                     error.CouldNotUnify => {
@@ -1272,10 +1291,11 @@ pub const AlgorithmJ = struct {
                     },
                 };
 
-                const resultType = try Type.init(self.allocator);
-                resultType.* = self.newVarT();
-                errdefer resultType.deinit(self.allocator);
-                for (case.patterns.items, case.bodies.items) |pattern, body| {
+                for (composite.constructors.?.values()) |*constructor| {
+                    constructor.* = false;
+                }
+
+                for (case.patterns.items) |pattern| {
                     if (composite.constructors.?.get(pattern.name.lexeme).?) {
                         try self.errors.errorAt(
                             pattern.name.start,
@@ -1286,86 +1306,105 @@ pub const AlgorithmJ = struct {
                         return error.CouldNotUnify;
                     } else {
                         composite.constructors.?.getPtr(pattern.name.lexeme).?.* = true;
-                        const constructorType = switch (self.globalTypes.get(pattern.name.lexeme).?.*) {
-                            .forall => |forall| forall.type,
-                            .type => |exactType| exactType,
-                        };
-                        const substitutedType = try self.copyAndReplace(constructorType, &instantiatedVars, &copyMap);
-                        defer substitutedType.deinit(self.allocator);
-                        var constrType = substitutedType;
-                        for (pattern.values.items) |value| {
-                            switch (constrType.data) {
-                                .composite => {
+                        std.debug.print("{s}", .{pattern.name.lexeme});
+                    }
+                }
+
+                for (composite.constructors.?.keys(), composite.constructors.?.values()) |key, value| {
+                    if (!value) {
+                        try self.errors.errorAt(
+                            case.start,
+                            computeBoundaries(ast).end,
+                            "Constructor {s} is not matched.",
+                            .{key},
+                        );
+                        return error.NonExhaustiveMatch;
+                    }
+                }
+
+                const resultType = try Type.init(self.allocator);
+                resultType.* = self.newVarT();
+                errdefer resultType.deinit(self.allocator);
+                for (case.patterns.items, case.bodies.items) |pattern, body| {
+                    const constructorType = switch (self.globalTypes.get(pattern.name.lexeme).?.*) {
+                        .forall => |forall| forall.type,
+                        .type => |exactType| exactType,
+                    };
+                    const substitutedType = try self.copyAndReplace(constructorType, &instantiatedVars, &copyMap);
+                    defer substitutedType.deinit(self.allocator);
+                    var constrType = substitutedType;
+                    for (pattern.values.items) |value| {
+                        switch (constrType.data) {
+                            .composite => {
+                                try self.errors.errorAt(
+                                    pattern.name.start,
+                                    pattern.name.end,
+                                    "Too many arguments given to the constructor.",
+                                    .{},
+                                );
+                            },
+                            .function => |func| {
+                                if (self.globalTypes.contains(value.lexeme)) {
                                     try self.errors.errorAt(
-                                        pattern.name.start,
-                                        pattern.name.end,
-                                        "Too many arguments given to the constructor.",
+                                        value.start,
+                                        value.end,
+                                        "This name is used for a global variable.",
                                         .{},
                                     );
-                                },
-                                .function => |func| {
-                                    if (self.globalTypes.contains(value.lexeme)) {
-                                        try self.errors.errorAt(
-                                            value.start,
-                                            value.end,
-                                            "This name is used for a global variable.",
-                                            .{},
-                                        );
-                                        return error.CouldNotUnify;
-                                    }
-                                    if (typeEnv.contains(value.lexeme)) {
-                                        try self.errors.errorAt(
-                                            value.start,
-                                            value.end,
-                                            "This name shadows another variable.",
-                                            .{},
-                                        );
-                                        return error.CouldNotUnify;
-                                    }
-                                    const valueScheme = try self.allocator.create(TypeScheme);
-                                    errdefer self.allocator.destroy(valueScheme);
+                                    return error.CouldNotUnify;
+                                }
+                                if (typeEnv.contains(value.lexeme)) {
+                                    try self.errors.errorAt(
+                                        value.start,
+                                        value.end,
+                                        "This name shadows another variable.",
+                                        .{},
+                                    );
+                                    return error.CouldNotUnify;
+                                }
+                                const valueScheme = try self.allocator.create(TypeScheme);
+                                errdefer self.allocator.destroy(valueScheme);
 
-                                    valueScheme.* = .{ .type = func.from };
-                                    func.from.rc += 1;
-                                    try typeEnv.put(value.lexeme, valueScheme);
-                                    constrType = func.to;
-                                },
-                                else => {
-                                    unreachable;
-                                },
-                            }
-                        }
-                        const bodyType = try self.run(typeEnv, body);
-                        defer bodyType.deinit(self.allocator);
-                        for (pattern.values.items) |value| {
-                            deinitScheme(typeEnv.get(value.lexeme).?, self.allocator);
-                            _ = typeEnv.remove(value.lexeme);
-                        }
-                        self.unify(resultType, bodyType) catch |err| switch (err) {
-                            error.CouldNotUnify => {
-                                try self.errors.typeComparison(
-                                    computeBoundaries(body),
-                                    bodyType,
-                                    resultType,
-                                    "These types should be the same",
-                                    "they are from the same pattern match.",
-                                    computeBoundaries(case.bodies.items[0]),
-                                );
-                                return err;
+                                valueScheme.* = .{ .type = func.from };
+                                func.from.rc += 1;
+                                try typeEnv.put(value.lexeme, valueScheme);
+                                constrType = func.to;
                             },
-                            error.InfiniteType => {
-                                try self.errors.typeComparison(
-                                    computeBoundaries(body),
-                                    bodyType,
-                                    resultType,
-                                    "leads to an infinite type\nwhen combined with the type of this",
-                                    "they are from the same pattern match:",
-                                    computeBoundaries(case.bodies.items[0]),
-                                );
-                                return err;
+                            else => {
+                                unreachable;
                             },
-                        };
+                        }
                     }
+                    const bodyType = try self.run(typeEnv, body);
+                    defer bodyType.deinit(self.allocator);
+                    for (pattern.values.items) |value| {
+                        deinitScheme(typeEnv.get(value.lexeme).?, self.allocator);
+                        _ = typeEnv.remove(value.lexeme);
+                    }
+                    self.unify(resultType, bodyType) catch |err| switch (err) {
+                        error.CouldNotUnify => {
+                            try self.errors.typeComparison(
+                                computeBoundaries(body),
+                                bodyType,
+                                resultType,
+                                "These types should be the same",
+                                "they are from the same pattern match.",
+                                computeBoundaries(case.bodies.items[0]),
+                            );
+                            return err;
+                        },
+                        error.InfiniteType => {
+                            try self.errors.typeComparison(
+                                computeBoundaries(body),
+                                bodyType,
+                                resultType,
+                                "leads to an infinite type\nwhen combined with the type of this",
+                                "they are from the same pattern match:",
+                                computeBoundaries(case.bodies.items[0]),
+                            );
+                            return err;
+                        },
+                    };
                 }
                 return resultType;
             },
@@ -1386,6 +1425,8 @@ pub const AlgorithmJ = struct {
                 try self.globalTypes.put(let.name.lexeme, t);
             },
             .type => |typeDecl| {
+                const prevDepth = self.depth;
+                self.depth = std.math.maxInt(usize);
                 for (typeDecl.constructors.items) |constructor| {
                     if (self.globalTypes.contains(constructor.name.lexeme)) {
                         try self.errors.errorAt(
@@ -1412,6 +1453,7 @@ pub const AlgorithmJ = struct {
                     try self.globalTypes.put(constructor.name.lexeme, constructorType);
                     try self.constructorToType.put(constructor.name.lexeme, typeDecl.name.lexeme);
                 }
+                self.depth = prevDepth;
             },
         }
     }

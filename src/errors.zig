@@ -93,14 +93,8 @@ pub const Errors = struct {
                 };
             },
             .case => |case| {
-                const lastPattern = case.patterns.items[case.patterns.items.len - 1];
-                var end: usize = undefined;
-                if (lastPattern.values.items.len == 0) {
-                    end = lastPattern.name.end;
-                } else {
-                    end = lastPattern.values.items[lastPattern.values.items.len - 1].end;
-                }
-                return .{ .start = case.start, .end = end };
+                const lastBody = case.bodies.items[case.bodies.items.len - 1];
+                return .{ .start = case.start, .end = computeBoundaries(lastBody).end };
             },
         }
     }
@@ -526,25 +520,6 @@ pub const Errors = struct {
 
     // Print an error at a specific point in the code
     pub fn errorAt(self: *Errors, start: usize, end: usize, comptime msg: []const u8, args: anytype) !void {
-        var line: usize = 0;
-        var startOfLine: usize = 0;
-        var i: usize = 0;
-        while (i <= start) : (i += 1) {
-            if (self.source[i] == '\n') {
-                line += 1;
-                startOfLine = i + 1;
-            }
-        }
-        while (i != self.source.len and self.source[i] != '\n') {
-            i += 1;
-        }
-        try self.stderr.print("\x1b[1m{s}:{d}:{d}:\x1b[m ", .{
-            self.fileName,
-            line + 1,
-            start - startOfLine + 1,
-        });
-        try self.printError(msg, args);
-        try self.stderr.print("\n{s}\n", .{self.source[startOfLine..i]});
-        try self.printIndicator(startOfLine, start - startOfLine, end - startOfLine);
+        try self.indicateRegion(.{ .start = start, .end = end }, msg, args, true);
     }
 };

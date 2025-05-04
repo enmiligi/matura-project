@@ -676,6 +676,19 @@ pub const Interpreter = struct {
                     },
                 }
             },
+            .case => |case| {
+                const value = try self.eval(case.value);
+                const construct = value.object.content.construct;
+                for (case.patterns.items, case.bodies.items) |pattern, body| {
+                    if (std.mem.eql(u8, pattern.name.lexeme, construct.name)) {
+                        for (construct.values.items, pattern.values.items) |val, name| {
+                            try self.set(name.lexeme, val);
+                        }
+                        return self.eval(body);
+                    }
+                }
+                return error.UnexpectedType;
+            },
         }
     }
 
