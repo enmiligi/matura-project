@@ -51,8 +51,14 @@ pub const OptimizeClosures = struct {
             },
             .case => |case| {
                 try findEnclosed(case.value, found, exclude);
-                for (case.bodies.items) |body| {
+                for (case.patterns.items, case.bodies.items) |pattern, body| {
+                    for (pattern.values.items) |value| {
+                        try exclude.put(value.lexeme, undefined);
+                    }
                     try findEnclosed(body, found, exclude);
+                    for (pattern.values.items) |value| {
+                        _ = exclude.remove(value.lexeme);
+                    }
                 }
             },
             .lambdaMult => {},

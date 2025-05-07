@@ -100,7 +100,7 @@ pub fn main() !u8 {
             error.NonExhaustiveMatch,
             => {
                 try errbw.flush();
-                return err;
+                return 1;
             },
             else => {
                 return err;

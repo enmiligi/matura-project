@@ -46,9 +46,6 @@ pub const Type = struct {
     }
 
     pub fn deinit(self: *Type, allocator: std.mem.Allocator) void {
-        if (self.rc == 0) {
-            std.debug.print("{any}", .{self});
-        }
         self.rc -= 1;
         if (self.rc == 0) {
             switch (self.data) {
@@ -709,7 +706,7 @@ pub const AlgorithmJ = struct {
                     errdefer self.allocator.destroy(t);
                     t.data = .{ .typeVar = .{
                         .n = typeVar.n,
-                        .depth = typeVar.depth,
+                        .depth = self.depth,
                         .subst = try self.copyAndReplace(subst, replacementMap, copyMap),
                     } };
                     result = t;
@@ -752,7 +749,12 @@ pub const AlgorithmJ = struct {
                 const t = try Type.init(self.allocator);
                 errdefer self.allocator.destroy(t);
                 var copiedArgs = std.ArrayList(*Type).init(self.allocator);
-                errdefer copiedArgs.deinit();
+                errdefer {
+                    for (copiedArgs.items) |arg| {
+                        arg.deinit(self.allocator);
+                    }
+                    copiedArgs.deinit();
+                }
                 for (composite.args.items) |arg| {
                     try copiedArgs.append(try self.copyAndReplace(
                         arg,
@@ -905,7 +907,6 @@ pub const AlgorithmJ = struct {
                     return err;
                 },
                 else => {
-                    std.debug.print("{?}", .{err});
                     return err;
                 },
             };
@@ -1081,7 +1082,15 @@ pub const AlgorithmJ = struct {
                         );
                         return err;
                     },
-                    else => {
+                    error.InfiniteType => {
+                        try self.errors.typeComparison(
+                            computeBoundaries(ifExpr.thenExpr),
+                            typeOfThen,
+                            typeOfElse,
+                            "leads to an infinite type\nwhen combined with the type of this",
+                            "they are the two branches of an if expression",
+                            computeBoundaries(ifExpr.elseExpr),
+                        );
                         return err;
                     },
                 };
@@ -1095,11 +1104,13 @@ pub const AlgorithmJ = struct {
                 const t2 = try self.run(typeEnv, call.arg);
                 defer t2.deinit(self.allocator);
                 const fType = try Type.init(self.allocator);
-                defer self.allocator.destroy(fType);
+                t2.rc += 1;
+                t.rc += 1;
                 fType.data = .{ .function = .{
                     .from = t2,
                     .to = t,
                 } };
+                defer fType.deinit(self.allocator);
                 self.unify(t1, fType) catch |err| switch (err) {
                     error.CouldNotUnify => {
                         try self.errors.typeComparison(
@@ -1306,7 +1317,6 @@ pub const AlgorithmJ = struct {
                         return error.CouldNotUnify;
                     } else {
                         composite.constructors.?.getPtr(pattern.name.lexeme).?.* = true;
-                        std.debug.print("{s}", .{pattern.name.lexeme});
                     }
                 }
 
