@@ -106,7 +106,7 @@ pub const Errors = struct {
         var startOfLine: usize = 0;
         var endOfLine: usize = 0;
         var i: usize = 0;
-        while (i <= region.start) : (i += 1) {
+        while (i < region.start) : (i += 1) {
             if (self.source[i] == '\n') {
                 startLine += 1;
                 startOfLine = i + 1;
@@ -130,7 +130,7 @@ pub const Errors = struct {
         try self.printBold("{s}:{d}:{d}: ", .{
             self.fileName,
             startLine + 1,
-            region.start - startOfLine + 1,
+            (region.start + 1) - startOfLine,
         });
         if (err) {
             try self.printError(msg, args);

@@ -490,8 +490,8 @@ pub const Parser = struct {
             try self.errs.errorAt(
                 self.peekToken().start,
                 self.peekToken().end,
-                "This can't be used at the beginning of an expression.",
-                .{},
+                "{s} can't be at the beginning of an expression.",
+                .{token.formatTokenType(self.peekToken().type)},
             );
             return error.InvalidPrefix;
         };
@@ -778,7 +778,6 @@ pub const Parser = struct {
     }
 
     fn operator(self: *Parser, left: *AST) !*AST {
-        errdefer left.deinit(self.allocator);
         const t = try self.getToken();
         const prec: usize = switch (t.lexeme[0]) {
             '<', '>', '!', '=' => 10,

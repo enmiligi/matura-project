@@ -165,6 +165,7 @@ pub const Lexer = struct {
             self.location += 1;
         }
         if (newLineOccurred and self.tokenStart + 1 == self.location) {
+            self.tokenStart += 1;
             return self.makeToken(.NewStatement);
         }
         self.tokenStart = self.location;

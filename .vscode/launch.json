@@ -9,7 +9,7 @@
             "request": "launch",
             "name": "Debug",
             "program": "${workspaceFolder}/zig-out/bin/matura-project",
-            "args": ["examples/list.lang"],
+            "args": ["examples/primes.lang"],
             "cwd": "${workspaceFolder}"
         }
     ]

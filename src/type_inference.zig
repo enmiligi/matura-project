@@ -1140,13 +1140,16 @@ pub const AlgorithmJ = struct {
                 errdefer self.allocator.destroy(t);
                 const newTypeVar = try Type.init(self.allocator);
                 newTypeVar.* = self.newVarT();
+                errdefer newTypeVar.deinit(self.allocator);
                 var typeScheme: *TypeScheme = undefined;
                 {
                     errdefer newTypeVar.deinit(self.allocator);
                     typeScheme = try self.allocator.create(TypeScheme);
                 }
                 typeScheme.* = .{ .type = newTypeVar };
+                newTypeVar.rc += 1;
                 if (typeEnv.contains(lambda.argname.lexeme)) {
+                    deinitScheme(typeScheme, self.allocator);
                     try self.errors.errorAt(
                         lambda.argname.start,
                         lambda.argname.end,
@@ -1156,15 +1159,13 @@ pub const AlgorithmJ = struct {
                     return error.CouldNotUnify;
                 }
                 {
-                    errdefer self.allocator.destroy(typeScheme);
-                    errdefer newTypeVar.deinit(self.allocator);
+                    errdefer deinitScheme(typeScheme, self.allocator);
                     try typeEnv.put(lambda.argname.lexeme, typeScheme);
                 }
                 const returnType = try self.run(typeEnv, lambda.expr);
                 errdefer returnType.deinit(self.allocator);
-                self.allocator.destroy(typeScheme);
-                errdefer newTypeVar.deinit(self.allocator);
                 _ = typeEnv.remove(lambda.argname.lexeme);
+                deinitScheme(typeScheme, self.allocator);
                 t.data = .{ .function = .{
                     .from = newTypeVar,
                     .to = returnType,
