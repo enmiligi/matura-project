@@ -21,6 +21,11 @@ pub const Errors = struct {
         self.typeVarMap.deinit();
     }
 
+    pub fn newSource(self: *Errors, fileName: []const u8, source: []const u8) void {
+        self.fileName = fileName;
+        self.source = source;
+    }
+
     // Indicate a subsequence with carets (^)
     fn printIndicator(self: *Errors, startIndex: usize, start: usize, end: usize) !void {
         const contents = try self.allocator.alloc(u8, end);
@@ -106,7 +111,7 @@ pub const Errors = struct {
         var startOfLine: usize = 0;
         var endOfLine: usize = 0;
         var i: usize = 0;
-        while (i < region.start) : (i += 1) {
+        while (i < region.start and i != self.source.len) : (i += 1) {
             if (self.source[i] == '\n') {
                 startLine += 1;
                 startOfLine = i + 1;
@@ -118,7 +123,7 @@ pub const Errors = struct {
         endOfLine = i;
         var endLine: usize = startLine;
         var startOfEndLine = i + 1;
-        while (i < region.end) : (i += 1) {
+        while (i < region.end and i != self.source.len) : (i += 1) {
             if (self.source[i] == '\n') {
                 endLine += 1;
                 startOfEndLine = i + 1;

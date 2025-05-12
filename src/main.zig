@@ -9,6 +9,7 @@ pub const interpreter = @import("./interpreter.zig");
 pub const value = @import("./value.zig");
 pub const errors = @import("./errors.zig");
 pub const optimizer = @import("./optimizer.zig");
+pub const runner = @import("./runner.zig");
 
 const MainError = error{
     WrongUsage,
@@ -21,11 +22,11 @@ pub fn main() !u8 {
     defer _ = gpa.deinit();
 
     // Initialize stdin and stdout
-    const stdout_file = std.io.getStdOut().writer();
+    const stdout_file = std.io.getStdOut().writer().any();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
 
-    const stderr_file = std.io.getStdErr().writer();
+    const stderr_file = std.io.getStdErr().writer().any();
     var errbw = std.io.bufferedWriter(stderr_file);
     const stderr = errbw.writer();
 
@@ -41,28 +42,10 @@ pub fn main() !u8 {
         return MainError.WrongUsage;
     }
 
-    // Initialize file
-    const cwd = std.fs.cwd();
-    const file = cwd.openFile(consoleArgs[1], .{ .mode = .read_only }) catch |err| {
-        switch (err) {
-            error.FileNotFound => {
-                try stderr.print("File {s} does not exist.\n", .{consoleArgs[1]});
-                try errbw.flush();
-            },
-            else => {},
-        }
-        return err;
-    };
-    defer file.close();
-
-    // Read file
-    const fileContents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-    defer allocator.free(fileContents);
-
     var errs: errors.Errors = .{
         .stderr = stderr.any(),
-        .source = fileContents,
-        .fileName = consoleArgs[1],
+        .source = undefined,
+        .fileName = undefined,
         .allocator = allocator,
         .typeVarMap = .init(allocator),
     };
@@ -72,14 +55,28 @@ pub fn main() !u8 {
     defer algorithmJ.deinit();
 
     // Create Parser
-    var fileParser = try parser.Parser.init(allocator, fileContents, &errs, &algorithmJ);
+    var fileParser = try parser.Parser.init(allocator, &errs, &algorithmJ);
     defer fileParser.deinit();
 
-    // // Parse an expression
-    // // Set depth to max to ensure annotated type doesn't prevent generalization
-    algorithmJ.depth = std.math.maxInt(usize);
-    const statements = fileParser.file() catch |err| switch (err) {
-        error.InvalidChar, error.UnexpectedToken, error.InvalidPrefix => {
+    var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
+    var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv);
+    defer interpreter_.deinit();
+
+    var fileRunner = runner.Runner.init(allocator);
+    defer fileRunner.deinit();
+
+    // Read builtin types
+    const binDirName = std.fs.path.dirname(consoleArgs[0]) orelse ".";
+    var binDir: std.fs.Dir = undefined;
+    if (std.fs.path.isAbsolute(binDirName)) {
+        binDir = try std.fs.openDirAbsolute(binDirName, .{});
+    } else {
+        binDir = try std.fs.cwd().openDir(binDirName, .{});
+    }
+    defer binDir.close();
+    var builtin = binDir.openDir("../lib/matura-project/builtin", .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => {
+            try stderr.print("Lib folder is not in the parent folder of the binary", .{});
             try errbw.flush();
             return 1;
         },
@@ -87,26 +84,51 @@ pub fn main() !u8 {
             return err;
         },
     };
-    // // Reset depth
-    algorithmJ.depth = 0;
-    defer ast.Statement.deinitStatements(statements, allocator);
+    defer builtin.close();
+    var builtins = builtin.iterate();
+    while (try builtins.next()) |builtinFile| {
+        if (builtinFile.kind == .file) {
+            var f = try builtin.openFile(builtinFile.name, .{ .mode = .read_only });
+            defer f.close();
+            if (try fileRunner.runFile(
+                f,
+                builtinFile.name,
+                &fileParser,
+                &algorithmJ,
+                &interpreter_,
+                &errs,
+                &errbw,
+            )) |returnCode| {
+                return returnCode;
+            }
+        }
+    }
 
-    for (statements.items) |*statement| {
-        algorithmJ.checkStatement(statement.*) catch |err| switch (err) {
-            error.UnknownIdentifier,
-            error.CouldNotUnify,
-            error.InfiniteType,
-            error.TooGeneral,
-            error.NonExhaustiveMatch,
-            => {
+    // Initialize file
+    const cwd = std.fs.cwd();
+    const file = cwd.openFile(consoleArgs[1], .{ .mode = .read_only }) catch |err| {
+        switch (err) {
+            error.FileNotFound => {
+                try stderr.print("File {s} does not exist.\n", .{consoleArgs[1]});
                 try errbw.flush();
                 return 1;
             },
-            else => {
-                return err;
-            },
-        };
-        try optimizer.optimizeStatement(statement, allocator);
+            else => {},
+        }
+        return err;
+    };
+    defer file.close();
+
+    if (try fileRunner.runFile(
+        file,
+        consoleArgs[1],
+        &fileParser,
+        &algorithmJ,
+        &interpreter_,
+        &errs,
+        &errbw,
+    )) |returnCode| {
+        return returnCode;
     }
 
     if (algorithmJ.globalTypes.get("main") == null) {
@@ -115,18 +137,6 @@ pub fn main() !u8 {
         return 1;
     }
 
-    for (statements.items) |statement| {
-        try statement.print(stdout.any(), allocator);
-        try stdout.print("\n", .{});
-    }
-    try bw.flush();
-
-    var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
-    var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv);
-    defer interpreter_.deinit();
-    for (statements.items) |statement| {
-        try interpreter_.runStatement(statement);
-    }
     const result = interpreter_.lookup("main").?;
     try value.printValue(result, stdout.any());
 

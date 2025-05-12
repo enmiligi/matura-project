@@ -38,20 +38,24 @@ pub const Parser = struct {
     // Initialize parser and Lexer
     pub fn init(
         allocator: std.mem.Allocator,
-        source: []const u8,
         errs: *errors.Errors,
         algorithmJ: *type_inference.AlgorithmJ,
     ) !Parser {
-        var l = try allocator.create(lexer.Lexer);
-        l.* = .{ .source = source, .errs = errs };
+        const l = try allocator.create(lexer.Lexer);
+        l.* = .{ .source = undefined, .errs = errs };
         return .{
             .allocator = allocator,
             .lexer = l,
-            .next = try l.getToken(),
+            .next = undefined,
             .errs = errs,
             .algorithmJ = algorithmJ,
             .typeVarMap = null,
         };
+    }
+
+    pub fn newSource(self: *Parser, source: []const u8) !void {
+        self.lexer.newSource(source);
+        self.next = try self.lexer.getToken();
     }
 
     pub fn deinit(self: *Parser) void {
@@ -271,6 +275,10 @@ pub const Parser = struct {
             },
             .Type => {
                 return self.typeStatement();
+            },
+            .NewStatement => {
+                _ = try self.getToken();
+                return self.statement();
             },
             else => {
                 try self.errs.errorAt(

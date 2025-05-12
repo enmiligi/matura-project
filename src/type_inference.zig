@@ -1238,6 +1238,14 @@ pub const AlgorithmJ = struct {
                             return error.CouldNotUnify;
                         }
                         type_ = constructorType;
+                    } else {
+                        try self.errors.errorAt(
+                            pattern.name.start,
+                            pattern.name.end,
+                            "The constructor '{s}' doesn't exist.",
+                            .{pattern.name.lexeme},
+                        );
+                        return error.UnknownIdentifier;
                     }
                 }
                 var composite = self.composite.getPtr(type_.?).?;

@@ -40,6 +40,14 @@ pub fn build(b: *std.Build) void {
     // step when running `zig build`).
     b.installArtifact(exe);
 
+    const write_step = b.addWriteFiles();
+    const copied_dir = write_step.addCopyDirectory(b.path("builtin"), "", .{});
+    b.installDirectory(.{
+        .install_dir = .lib,
+        .source_dir = copied_dir,
+        .install_subdir = "matura-project/builtin",
+    });
+
     // This *creates* a Run step in the build graph, to be executed when another
     // step is evaluated that depends on it. The next line below will establish
     // such a dependency.
