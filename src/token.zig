@@ -12,6 +12,8 @@ pub const TokenType = enum {
     Equal,
     LeftParen,
     RightParen,
+    LeftBracket,
+    RightBracket,
     Operator,
     Comma,
     // literals
@@ -63,6 +65,8 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .VBar => "'|'",
         .Case => "'case'",
         .Of => "'of'",
+        .LeftBracket => "'['",
+        .RightBracket => "']'",
     };
     return name;
 }

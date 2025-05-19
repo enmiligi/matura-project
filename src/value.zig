@@ -39,26 +39,56 @@ pub fn printValue(value: Value, writer: std.io.AnyWriter) !void {
                     }
                 },
                 .construct => |construct| {
-                    try writer.print("{s}", .{construct.name});
-                    for (construct.values.items) |val| {
-                        switch (val) {
-                            .object => |obj2| {
-                                switch (obj2.content) {
-                                    .construct => |construct2| {
-                                        if (construct2.values.items.len > 0) {
-                                            try writer.print(" (", .{});
-                                            try printValue(val, writer);
-                                            try writer.print(")", .{});
-                                            continue;
-                                        }
-                                    },
-                                    else => {},
-                                }
-                            },
-                            else => {},
+                    if (std.mem.eql(u8, construct.name, "Cons")) {
+                        try writer.print("[", .{});
+                        try printValue(construct.values.items[0], writer);
+                        var restList = construct.values.items[1];
+                        while (true) {
+                            switch (restList) {
+                                .object => |restObj| {
+                                    switch (restObj.content) {
+                                        .construct => |restConstruct| {
+                                            if (std.mem.eql(u8, restConstruct.name, "Cons")) {
+                                                try writer.print(", ", .{});
+                                                try printValue(restConstruct.values.items[0], writer);
+                                                restList = restConstruct.values.items[1];
+                                            } else {
+                                                break;
+                                            }
+                                        },
+                                        else => {
+                                            unreachable;
+                                        },
+                                    }
+                                },
+                                else => {
+                                    unreachable;
+                                },
+                            }
                         }
-                        try writer.print(" ", .{});
-                        try printValue(val, writer);
+                        try writer.print("]", .{});
+                    } else {
+                        try writer.print("{s}", .{construct.name});
+                        for (construct.values.items) |val| {
+                            switch (val) {
+                                .object => |obj2| {
+                                    switch (obj2.content) {
+                                        .construct => |construct2| {
+                                            if (construct2.values.items.len > 0) {
+                                                try writer.print(" (", .{});
+                                                try printValue(val, writer);
+                                                try writer.print(")", .{});
+                                                continue;
+                                            }
+                                        },
+                                        else => {},
+                                    }
+                                },
+                                else => {},
+                            }
+                            try writer.print(" ", .{});
+                            try printValue(val, writer);
+                        }
                     }
                 },
             }

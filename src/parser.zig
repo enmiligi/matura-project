@@ -761,6 +761,70 @@ pub const Parser = struct {
         return prefixOpAST;
     }
 
+    fn list(self: *Parser) !*AST {
+        const start = (try self.getToken()).start;
+
+        var exprs = std.ArrayList(*AST).init(self.allocator);
+        var endI: usize = 0;
+        defer {
+            for (0..endI) |i| {
+                exprs.items[i].deinit(self.allocator);
+            }
+            exprs.deinit();
+        }
+
+        {
+            if (self.peekToken().type != .RightBracket) {
+                try exprs.append(try self.expression(0));
+                endI += 1;
+            }
+
+            while (self.peekToken().type == .Comma) {
+                _ = try self.getToken();
+                if (self.peekToken().type != .RightBracket) {
+                    try exprs.append(try self.expression(0));
+                    endI += 1;
+                }
+            }
+        }
+
+        const end = (try self.expectToken(.RightBracket)).end;
+
+        var listExpr = try self.allocator.create(AST);
+        listExpr.* = .{ .identifier = .{ .token = .{
+            .start = start,
+            .end = end,
+            .lexeme = "Nil",
+            .type = .Identifier,
+        } } };
+        errdefer listExpr.deinit(self.allocator);
+
+        for (1..exprs.items.len + 1) |i| {
+            const cons = try self.allocator.create(AST);
+            cons.* = .{ .identifier = .{ .token = .{
+                .start = start,
+                .end = end,
+                .lexeme = "Cons",
+                .type = .Identifier,
+            } } };
+            errdefer cons.deinit(self.allocator);
+            const firstCall = try self.allocator.create(AST);
+            firstCall.* = .{ .call = .{
+                .function = cons,
+                .arg = exprs.items[exprs.items.len - i],
+            } };
+            errdefer firstCall.deinit(self.allocator);
+            endI -= 1;
+            const secondCall = try self.allocator.create(AST);
+            secondCall.* = .{ .call = .{
+                .function = firstCall,
+                .arg = listExpr,
+            } };
+            listExpr = secondCall;
+        }
+        return listExpr;
+    }
+
     // Get rule in prefix position
     fn getNud(self: *Parser) ?PrefixParseFn {
         return switch (self.peekToken().type) {
@@ -773,6 +837,7 @@ pub const Parser = struct {
             token.TokenType.Lambda => lambda,
             token.TokenType.If => ifExpr,
             token.TokenType.Case => caseExpr,
+            token.TokenType.LeftBracket => list,
             token.TokenType.Operator => {
                 if (self.peekToken().lexeme.len == 1 and
                     (self.peekToken().lexeme[0] == '-' or self.peekToken().lexeme[0] == '!'))
