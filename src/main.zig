@@ -63,6 +63,7 @@ pub fn main() !u8 {
     defer interpreter_.deinit();
 
     var fileRunner = runner.Runner.init(allocator);
+
     defer fileRunner.deinit();
 
     // Read builtin types

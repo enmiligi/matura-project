@@ -236,6 +236,9 @@ pub const AST = union(enum) {
             .boolConstant => |boolConst| {
                 try writer.print("Bool({s})", .{boolConst.token.lexeme});
             },
+            .charConstant => |charConst| {
+                try writer.print("Char({s})", .{charConst.token.lexeme});
+            },
             .identifier => |id| {
                 try writer.print("Identifier({s})", .{id.token.lexeme});
             },
@@ -264,14 +267,14 @@ pub const AST = union(enum) {
                 try writer.print("])", .{});
             },
             .list => |list| {
-                try writer.write("[");
+                try writer.print("[", .{});
                 for (list.values.items, 0..) |value, i| {
                     try value.print(writer);
                     if (i != list.values.items.len) {
-                        try writer.write(", ");
+                        try writer.print(", ", .{});
                     }
                 }
-                try writer.write("]");
+                try writer.print("]", .{});
             },
         }
     }

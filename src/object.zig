@@ -38,7 +38,7 @@ pub const ObjectContent = union(enum) {
     construct: Construct,
 };
 
-const GCStressTest: bool = false;
+const GCStressTest: bool = true;
 const GCLog: bool = true;
 
 pub const Object = struct {
@@ -81,7 +81,11 @@ pub const Objects = struct {
     objCount: usize = 0,
     objCountUntilGC: usize = 100,
 
-    pub fn init(allocator: std.mem.Allocator, preserveValues: *std.ArrayList(Value), currentEnv: *Env) Objects {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        preserveValues: *std.ArrayList(Value),
+        currentEnv: *Env,
+    ) Objects {
         return .{
             .allocator = allocator,
             .preserveValues = preserveValues,
@@ -117,7 +121,16 @@ pub const Objects = struct {
                         }
                     }
                 },
-                .construct => {},
+                .construct => |construct| {
+                    for (construct.values.items) |value| {
+                        switch (value) {
+                            .object => |valObj| {
+                                self.markObject(valObj);
+                            },
+                            else => {},
+                        }
+                    }
+                },
             }
         }
     }

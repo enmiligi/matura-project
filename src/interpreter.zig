@@ -455,11 +455,16 @@ pub const Interpreter = struct {
                             }
                         } else {
                             if (multiClos.argNames.items.len == 2) {
+                                const argName = multiClos.argNames.items[0];
+                                const code = multiClos.code;
                                 const closObj = try self.objects.makeClosure(
-                                    multiClos.argNames.items[0],
+                                    argName,
                                     copiedEnv,
-                                    multiClos.code,
+                                    code,
                                 );
+                                // TODO: Find out why this is needed.
+                                const x = argName.lexeme;
+                                _ = x;
                                 return .{
                                     .object = closObj,
                                 };
