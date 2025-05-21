@@ -59,7 +59,7 @@ pub fn main() !u8 {
     defer fileParser.deinit();
 
     var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
-    var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv);
+    var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv, stdout.any());
     defer interpreter_.deinit();
 
     var fileRunner = runner.Runner.init(allocator);
@@ -103,6 +103,8 @@ pub fn main() !u8 {
             }
         }
     }
+
+    try fileParser.initBuiltins();
 
     // Initialize file
     const cwd = std.fs.cwd();

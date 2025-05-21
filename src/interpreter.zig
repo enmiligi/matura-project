@@ -2,13 +2,14 @@ const std = @import("std");
 const token = @import("./token.zig");
 const AST = @import("./ast.zig").AST;
 const Statement = @import("./ast.zig").Statement;
-const Value = @import("./value.zig").Value;
+const value = @import("./value.zig");
+const Value = value.Value;
 const object = @import("./object.zig");
 const errors = @import("./errors.zig");
 
 const nullToken = token.Token{ .start = 0, .end = 0, .lexeme = "", .type = .Identifier };
 
-const EvalError = error{
+pub const EvalError = error{
     UnknownIdentifier,
 
     // This should never happen because of the type inference/checking
@@ -26,13 +27,16 @@ pub const Interpreter = struct {
     preserveValues: *std.ArrayList(Value),
     currentEnv: *Env,
     allocator: std.mem.Allocator,
+    stdout: std.io.AnyWriter,
 
     argNameMap: std.StringHashMap(std.ArrayList(token.Token)),
 
     pub fn init(
         allocator: std.mem.Allocator,
         initialEnv: *std.StringHashMap(Value),
+        stdout: std.io.AnyWriter,
     ) !Interpreter {
+        try initBuiltins(initialEnv);
         const preserveValues = try allocator.create(std.ArrayList(Value));
         errdefer allocator.destroy(preserveValues);
         preserveValues.* = .init(allocator);
@@ -47,7 +51,20 @@ pub const Interpreter = struct {
             .currentEnv = env,
             .allocator = allocator,
             .argNameMap = .init(allocator),
+            .stdout = stdout,
         };
+    }
+
+    fn initBuiltins(env: *std.StringHashMap(Value)) !void {
+        try env.put("print", .{ .builtinFunction = &print });
+    }
+
+    fn print(self: *Interpreter, arg: Value) !Value {
+        try value.printValue(arg, self.stdout);
+        try self.stdout.print("\n", .{});
+        const values = std.ArrayList(Value).init(self.allocator);
+        const composite = try self.objects.makeConstruct("Void", values);
+        return .{ .object = composite };
     }
 
     fn deinitEnvs(self: *Interpreter) void {
@@ -245,6 +262,13 @@ pub const Interpreter = struct {
                                     else => {},
                                 }
                             },
+                            .builtinFunction => {
+                                return switch (op.lexeme[0]) {
+                                    '=' => .{ .bool = false },
+                                    '!' => .{ .bool = true },
+                                    else => undefined,
+                                };
+                            },
                             else => {},
                         }
                     },
@@ -269,6 +293,13 @@ pub const Interpreter = struct {
                                     },
                                     else => {},
                                 }
+                            },
+                            .builtinFunction => {
+                                return switch (op.lexeme[0]) {
+                                    '=' => .{ .bool = false },
+                                    '!' => .{ .bool = true },
+                                    else => undefined,
+                                };
                             },
                             else => {},
                         }
@@ -300,12 +331,32 @@ pub const Interpreter = struct {
                     },
                 }
             },
+            .builtinFunction => |builtin1| {
+                switch (right) {
+                    .builtinFunction => |builtin2| {
+                        const res = switch (op.lexeme[0]) {
+                            '=' => builtin1 == builtin2,
+                            '!' => builtin1 != builtin2,
+                            else => undefined,
+                        };
+                        return .{ .bool = res };
+                    },
+                    else => {
+                        const res = switch (op.lexeme[0]) {
+                            '=' => false,
+                            '!' => true,
+                            else => undefined,
+                        };
+                        return .{ .bool = res };
+                    },
+                }
+            },
         }
         return error.UnexpectedType;
     }
 
     // Evaluate a closure given an argument
-    fn evalClosure(self: *Interpreter, function: Value, clos: object.Closure, arg: *AST) EvalError!Value {
+    fn evalClosure(self: *Interpreter, function: Value, clos: object.Closure, arg: *AST) !Value {
         try self.pushValue(function);
         const argument = try self.eval(arg);
         var copiedEnv = try clos.bound.clone();
@@ -410,6 +461,10 @@ pub const Interpreter = struct {
                         return error.UnexpectedType;
                     },
                 }
+            },
+            .builtinFunction => |builtin| {
+                const argument = try self.eval(arg);
+                return builtin(self, argument);
             },
             else => {
                 return error.UnexpectedType;
@@ -529,6 +584,20 @@ pub const Interpreter = struct {
                     },
                 }
             },
+            .builtinFunction => |builtin| {
+                // Arguments are stored in reverse
+                const result = try builtin(self, try self.eval(args.items[args.items.len - 1]));
+                if (args.items.len == 1) {
+                    return result;
+                } else if (args.items.len == 2) {
+                    return self.evalCall(result, args.items[0]);
+                } else {
+                    var copiedArgs = try args.clone();
+                    defer copiedArgs.deinit();
+                    _ = copiedArgs.pop();
+                    return self.evalCallMult(result, &copiedArgs);
+                }
+            },
             else => {
                 return error.UnexpectedType;
             },
@@ -536,7 +605,7 @@ pub const Interpreter = struct {
     }
 
     // Evaluate an expression
-    pub fn eval(self: *Interpreter, ast: *AST) EvalError!Value {
+    pub fn eval(self: *Interpreter, ast: *AST) anyerror!Value {
         switch (ast.*) {
             .boolConstant => |boolC| {
                 return .{ .bool = boolC.value };
@@ -556,8 +625,8 @@ pub const Interpreter = struct {
                 }
             },
             .identifier => |id| {
-                const value = self.lookup(id.token.lexeme);
-                if (value) |val| {
+                const idValue = self.lookup(id.token.lexeme);
+                if (idValue) |val| {
                     switch (val) {
                         .object => |obj| {
                             switch (obj.content) {
@@ -574,7 +643,7 @@ pub const Interpreter = struct {
                         else => {},
                     }
                 }
-                return value orelse error.UnknownIdentifier;
+                return idValue orelse error.UnknownIdentifier;
             },
             .let => |let| {
                 const prev = self.currentEnv.contents.get(let.name.lexeme);
@@ -677,8 +746,8 @@ pub const Interpreter = struct {
                 }
             },
             .case => |case| {
-                const value = try self.eval(case.value);
-                const construct = value.object.content.construct;
+                const caseValue = try self.eval(case.value);
+                const construct = caseValue.object.content.construct;
                 for (case.patterns.items, case.bodies.items) |pattern, body| {
                     if (std.mem.eql(u8, pattern.name.lexeme, construct.name)) {
                         for (construct.values.items, pattern.values.items) |val, name| {

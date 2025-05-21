@@ -139,7 +139,7 @@ pub const Lexer = struct {
 
     // identifier ::= alpha (alnum|_)*
     fn identifier(self: *Lexer) token.Token {
-        while (std.ascii.isAlphanumeric(self.getChar()) or self.getChar() == '_') {
+        while (self.location != self.source.len and (std.ascii.isAlphanumeric(self.getChar()) or self.getChar() == '_')) {
             self.location += 1;
         }
         const tt = identifierMap.get(self.getTokenString()) orelse .Identifier;

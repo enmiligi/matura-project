@@ -1,11 +1,13 @@
 const object = @import("object.zig");
 const std = @import("std");
+const interpreter = @import("./interpreter.zig");
 
 pub const Value = union(enum) {
     int: i64,
     float: f64,
     bool: bool,
     object: *object.Object,
+    builtinFunction: *const fn (self: *interpreter.Interpreter, arg: Value) anyerror!Value,
 };
 
 pub fn printValue(value: Value, writer: std.io.AnyWriter) !void {
@@ -92,6 +94,9 @@ pub fn printValue(value: Value, writer: std.io.AnyWriter) !void {
                     }
                 },
             }
+        },
+        .builtinFunction => {
+            try writer.print("Builtin function", .{});
         },
     }
 }

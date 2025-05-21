@@ -53,6 +53,31 @@ pub const Parser = struct {
         };
     }
 
+    fn initBuiltin(self: *Parser, name: []const u8, tExpr: []const u8) !void {
+        try self.newSource(tExpr);
+        var region: errors.Region = .{ .start = 0, .end = 0 };
+        const t = try self.typeExpr(&region, false, true);
+        const tS = self.algorithmJ.generalise(t, 0) catch |err| {
+            t.deinit(self.allocator);
+            return err;
+        };
+        errdefer type_inference.deinitScheme(tS, self.allocator);
+        try self.algorithmJ.globalTypes.put(name, tS);
+    }
+
+    pub fn initBuiltins(self: *Parser) !void {
+        self.typeVarMap = .init(self.allocator);
+        defer {
+            var iterator = self.typeVarMap.?.valueIterator();
+            while (iterator.next()) |value| {
+                value.*.deinit(self.allocator);
+            }
+            self.typeVarMap.?.deinit();
+            self.typeVarMap = null;
+        }
+        try self.initBuiltin("print", "a -> Void");
+    }
+
     pub fn newSource(self: *Parser, source: []const u8) !void {
         self.lexer.newSource(source);
         self.next = try self.lexer.getToken();
