@@ -304,7 +304,7 @@ pub const OptimizeFullyInstantiatedCalls = struct {
                     .lambda => {
                         try combineLambdas(ast, allocator);
 
-                        //try run(ast.lambdaMult.expr, allocator);
+                        try run(ast.lambdaMult.expr, allocator);
                     },
                     else => {
                         try run(lambda.expr, allocator);
