@@ -71,6 +71,21 @@ pub const Lexer = struct {
                 self.location += 1;
                 return t;
             }
+            if (c == '\"') {
+                self.location += 1;
+                while (self.location < self.source.len and self.getChar() != '"') {
+                    if (self.getChar() == '\\') {
+                        self.location += 1;
+                    }
+                    self.location += 1;
+                }
+                if (self.location == self.source.len) {
+                    try self.errs.errorAt(self.location, self.location, "There should be a \" to end the string.", .{});
+                    return error.InvalidChar;
+                }
+                self.location += 1;
+                return self.makeToken(.StringLiteral);
+            }
             if (c == '-' and self.source[self.location + 1] == '>') {
                 self.location += 2;
                 return self.makeToken(.Arrow);

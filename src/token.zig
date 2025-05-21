@@ -21,6 +21,7 @@ pub const TokenType = enum {
     IntLiteral,
     BoolLiteral,
     CharLiteral,
+    StringLiteral,
     // user-defined
     Identifier,
     // Newline with no whitespace
@@ -69,6 +70,7 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .Of => "'of'",
         .LeftBracket => "'['",
         .RightBracket => "']'",
+        .StringLiteral => "a string",
     };
     return name;
 }

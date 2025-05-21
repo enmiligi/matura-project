@@ -42,7 +42,43 @@ pub const ConvertList = struct {
                 ast.* = listExpr.*;
                 allocator.destroy(listExpr);
             },
-            else => {},
+            .let => |let| {
+                try run(let.in, allocator);
+                try run(let.be, allocator);
+            },
+            .ifExpr => |ifExpr| {
+                try run(ifExpr.predicate, allocator);
+                try run(ifExpr.thenExpr, allocator);
+                try run(ifExpr.elseExpr, allocator);
+            },
+            .call => |call| {
+                try run(call.function, allocator);
+                try run(call.arg, allocator);
+            },
+            .operator => |op| {
+                try run(op.left, allocator);
+                try run(op.right, allocator);
+            },
+            .lambda => |lambda| {
+                try run(lambda.expr, allocator);
+            },
+            .prefixOp => |prefixOp| {
+                try run(prefixOp.expr, allocator);
+            },
+            .case => |case| {
+                try run(case.value, allocator);
+                for (case.bodies.items) |body| {
+                    try run(body, allocator);
+                }
+            },
+            .lambdaMult,
+            .callMult,
+            .intConstant,
+            .floatConstant,
+            .boolConstant,
+            .charConstant,
+            .identifier,
+            => {},
         }
     }
 };

@@ -579,6 +579,8 @@ pub const Parser = struct {
                 'n' => '\n',
                 'r' => '\r',
                 't' => '\t',
+                '\'' => '\'',
+                '\"' => '\"',
                 else => {
                     try self.errs.errorAt(t.start + 1, t.start + 2, "Invalid escape code '{s}'.", .{t.lexeme});
                     return error.UnexpectedToken;
@@ -603,6 +605,51 @@ pub const Parser = struct {
 
     // Non-terminal prefix "operators"
     // ===============================
+    fn stringLiteral(self: *Parser) !*AST {
+        const t = try self.getToken();
+        var chars = std.ArrayList(*AST).init(self.allocator);
+        errdefer {
+            for (chars.items) |char| {
+                char.deinit(self.allocator);
+            }
+            chars.deinit();
+        }
+        var i: usize = 1;
+        while (i < t.lexeme.len - 1) : (i += 1) {
+            var value = t.lexeme[i];
+            var len: usize = 1;
+            if (t.lexeme[i] == '\\') {
+                len += 1;
+                value = switch (t.lexeme[i + 1]) {
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    '\'' => '\'',
+                    '\"' => '\"',
+                    else => {
+                        try self.errs.errorAt(t.start + 1, t.start + 2, "Invalid escape code '{s}'.", .{t.lexeme});
+                        return error.UnexpectedToken;
+                    },
+                };
+            }
+            const charLit = try self.allocator.create(AST);
+            charLit.* = .{ .charConstant = .{
+                .token = .{
+                    .start = t.start + i,
+                    .end = t.start + i + len,
+                    .lexeme = t.lexeme[i .. i + len],
+                    .type = .CharLiteral,
+                },
+                .value = value,
+            } };
+            try chars.append(charLit);
+            i += len - 1;
+        }
+        const stringList = try self.allocator.create(AST);
+        stringList.* = .{ .list = .{ .start = t.start, .end = t.end, .values = chars } };
+        return stringList;
+    }
+
     fn brackets(self: *Parser) !*AST {
         // Must be a left paren
         _ = try self.getToken();
@@ -852,6 +899,7 @@ pub const Parser = struct {
             token.TokenType.FloatLiteral => floatLiteral,
             token.TokenType.BoolLiteral => boolLiteral,
             token.TokenType.CharLiteral => charLiteral,
+            token.TokenType.StringLiteral => stringLiteral,
             token.TokenType.LeftParen => brackets,
             token.TokenType.Identifier => identifier,
             token.TokenType.Let => letExpression,
