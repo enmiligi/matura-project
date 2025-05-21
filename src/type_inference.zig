@@ -985,7 +985,11 @@ pub const AlgorithmJ = struct {
                 errdefer self.allocator.destroy(t);
                 const leftType = try self.run(typeEnv, op.left);
                 defer leftType.deinit(self.allocator);
-                if (op.token.lexeme[0] != '=' and op.token.lexeme[0] != '!') {
+                if (op.token.lexeme[0] == ';') {
+                    const rightType = try self.run(typeEnv, op.right);
+                    self.allocator.destroy(t);
+                    return rightType;
+                } else if (op.token.lexeme[0] != '=' and op.token.lexeme[0] != '!') {
                     const tV = try Type.init(self.allocator);
                     tV.* = self.newVarT();
                     const tNumber = Type.init(self.allocator) catch |err| {
@@ -1022,7 +1026,7 @@ pub const AlgorithmJ = struct {
                             op.right,
                             leftType,
                             rightType,
-                            "they are arguments to the same numeric operator",
+                            "they are arguments to the same operator",
                         );
                         return err;
                     },

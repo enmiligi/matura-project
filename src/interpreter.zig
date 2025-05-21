@@ -715,6 +715,9 @@ pub const Interpreter = struct {
                     '<', '>', '=', '!' => {
                         return evalComp(op.token, left, right);
                     },
+                    ';' => {
+                        return right;
+                    },
                     else => {
                         return undefined;
                     },

@@ -878,6 +878,7 @@ pub const Parser = struct {
     fn operator(self: *Parser, left: *AST) !*AST {
         const t = try self.getToken();
         const prec: usize = switch (t.lexeme[0]) {
+            ';' => 0,
             '<', '>', '!', '=' => 10,
             '+', '-' => 20,
             '*', '/' => 30,
@@ -911,6 +912,7 @@ pub const Parser = struct {
                     return .{ call, std.math.maxInt(Precedence) };
                 }
                 const prec: usize = switch (self.peekToken().lexeme[0]) {
+                    ';' => 5,
                     '<', '>', '=', '!' => 10,
                     '+', '-' => 20,
                     '*', '/' => 30,
