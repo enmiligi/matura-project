@@ -790,10 +790,9 @@ pub const Parser = struct {
         const start = (try self.getToken()).start;
 
         var exprs = std.ArrayList(*AST).init(self.allocator);
-        var endI: usize = 0;
-        defer {
-            for (0..endI) |i| {
-                exprs.items[i].deinit(self.allocator);
+        errdefer {
+            for (exprs.items) |expr| {
+                expr.deinit(self.allocator);
             }
             exprs.deinit();
         }
@@ -801,53 +800,27 @@ pub const Parser = struct {
         {
             if (self.peekToken().type != .RightBracket) {
                 try exprs.append(try self.expression(0));
-                endI += 1;
             }
 
             while (self.peekToken().type == .Comma) {
                 _ = try self.getToken();
                 if (self.peekToken().type != .RightBracket) {
                     try exprs.append(try self.expression(0));
-                    endI += 1;
                 }
             }
         }
 
         const end = (try self.expectToken(.RightBracket)).end;
 
-        var listExpr = try self.allocator.create(AST);
-        listExpr.* = .{ .identifier = .{ .token = .{
+        const listAst = try self.allocator.create(AST);
+
+        listAst.* = .{ .list = .{
             .start = start,
             .end = end,
-            .lexeme = "Nil",
-            .type = .Identifier,
-        } } };
-        errdefer listExpr.deinit(self.allocator);
+            .values = exprs,
+        } };
 
-        for (1..exprs.items.len + 1) |i| {
-            const cons = try self.allocator.create(AST);
-            cons.* = .{ .identifier = .{ .token = .{
-                .start = start,
-                .end = end,
-                .lexeme = "Cons",
-                .type = .Identifier,
-            } } };
-            errdefer cons.deinit(self.allocator);
-            const firstCall = try self.allocator.create(AST);
-            firstCall.* = .{ .call = .{
-                .function = cons,
-                .arg = exprs.items[exprs.items.len - i],
-            } };
-            errdefer firstCall.deinit(self.allocator);
-            endI -= 1;
-            const secondCall = try self.allocator.create(AST);
-            secondCall.* = .{ .call = .{
-                .function = firstCall,
-                .arg = listExpr,
-            } };
-            listExpr = secondCall;
-        }
-        return listExpr;
+        return listAst;
     }
 
     // Get rule in prefix position

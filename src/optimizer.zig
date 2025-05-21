@@ -3,6 +3,50 @@ const AST = @import("ast.zig").AST;
 const Statement = @import("ast.zig").Statement;
 const token = @import("./token.zig");
 
+pub const ConvertList = struct {
+    pub fn run(ast: *AST, allocator: std.mem.Allocator) !void {
+        switch (ast.*) {
+            .list => |list| {
+                var listExpr = try allocator.create(AST);
+                listExpr.* = .{ .identifier = .{ .token = .{
+                    .start = list.start,
+                    .end = list.end,
+                    .lexeme = "Nil",
+                    .type = .Identifier,
+                } } };
+                errdefer listExpr.deinit(allocator);
+
+                for (1..list.values.items.len + 1) |i| {
+                    const cons = try allocator.create(AST);
+                    cons.* = .{ .identifier = .{ .token = .{
+                        .start = list.start,
+                        .end = list.end,
+                        .lexeme = "Cons",
+                        .type = .Identifier,
+                    } } };
+                    errdefer cons.deinit(allocator);
+                    const firstCall = try allocator.create(AST);
+                    firstCall.* = .{ .call = .{
+                        .function = cons,
+                        .arg = list.values.items[list.values.items.len - i],
+                    } };
+                    errdefer firstCall.deinit(allocator);
+                    const secondCall = try allocator.create(AST);
+                    secondCall.* = .{ .call = .{
+                        .function = firstCall,
+                        .arg = listExpr,
+                    } };
+                    listExpr = secondCall;
+                }
+                list.values.deinit();
+                ast.* = listExpr.*;
+                allocator.destroy(listExpr);
+            },
+            else => {},
+        }
+    }
+};
+
 pub const OptimizeClosures = struct {
     fn findEnclosed(
         ast: *AST,
@@ -63,6 +107,7 @@ pub const OptimizeClosures = struct {
             },
             .lambdaMult => {},
             .callMult => {},
+            .list => {},
         }
     }
 
@@ -107,6 +152,7 @@ pub const OptimizeClosures = struct {
             },
             .lambdaMult => {},
             .callMult => {},
+            .list => {},
         }
     }
 };
@@ -240,6 +286,7 @@ pub const OptimizeFullyInstantiatedCalls = struct {
             },
             .lambdaMult => {},
             .callMult => {},
+            .list => {},
         }
     }
 };
@@ -247,6 +294,7 @@ pub const OptimizeFullyInstantiatedCalls = struct {
 pub fn optimizeStatement(statement: *Statement, allocator: std.mem.Allocator) !void {
     switch (statement.*) {
         .let => |let| {
+            try ConvertList.run(let.be, allocator);
             try OptimizeClosures.run(let.be, allocator);
             try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
         },

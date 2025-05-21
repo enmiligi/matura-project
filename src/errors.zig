@@ -101,6 +101,9 @@ pub const Errors = struct {
                 const lastBody = case.bodies.items[case.bodies.items.len - 1];
                 return .{ .start = case.start, .end = computeBoundaries(lastBody).end };
             },
+            .list => |list| {
+                return .{ .start = list.start, .end = list.end };
+            },
         }
     }
 

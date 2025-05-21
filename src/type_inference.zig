@@ -1296,7 +1296,7 @@ pub const AlgorithmJ = struct {
                             computeBoundaries(case.value),
                             typeOfValue,
                             copiedCompositeType,
-                            "These types should be the same",
+                            "should be the same as this",
                             "the value is matched with this constructor.",
                             computeBoundaries(case.bodies.items[0]),
                         );
@@ -1410,7 +1410,7 @@ pub const AlgorithmJ = struct {
                                 computeBoundaries(body),
                                 bodyType,
                                 resultType,
-                                "These types should be the same",
+                                "should be the same as this",
                                 "they are from the same pattern match.",
                                 computeBoundaries(case.bodies.items[0]),
                             );
@@ -1430,6 +1430,53 @@ pub const AlgorithmJ = struct {
                     };
                 }
                 return resultType;
+            },
+            .list => |list| {
+                t.* = self.newVarT();
+                errdefer t.deinit(self.allocator);
+                for (list.values.items, 0..) |value, i| {
+                    const typeOfVal = try self.run(typeEnv, value);
+                    defer typeOfVal.deinit(self.allocator);
+                    self.unify(t, typeOfVal) catch |err| switch (err) {
+                        error.CouldNotUnify => {
+                            try self.errors.typeComparison(
+                                computeBoundaries(value),
+                                typeOfVal,
+                                t,
+                                "should be the same as this",
+                                "it is the type of the previous elements.",
+                                .{
+                                    .start = computeBoundaries(list.values.items[0]).start,
+                                    .end = computeBoundaries(list.values.items[i - 1]).end,
+                                },
+                            );
+                            return err;
+                        },
+                        error.InfiniteType => {
+                            try self.errors.typeComparison(
+                                computeBoundaries(value),
+                                typeOfVal,
+                                t,
+                                "leads to an infinite type\nwhen combined with the type of this",
+                                "it is the type of the previous elements.",
+                                .{
+                                    .start = computeBoundaries(list.values.items[0]).start,
+                                    .end = computeBoundaries(list.values.items[i - 1]).end,
+                                },
+                            );
+                            return err;
+                        },
+                    };
+                }
+                var listArgs = std.ArrayList(*Type).init(self.allocator);
+                errdefer listArgs.deinit();
+                try listArgs.append(t);
+                const listType = try Type.init(self.allocator);
+                listType.data = .{ .composite = .{
+                    .name = "List",
+                    .args = listArgs,
+                } };
+                return listType;
             },
             .lambdaMult => {},
             .callMult => {},

@@ -90,6 +90,11 @@ pub const AST = union(enum) {
         patterns: std.ArrayList(Pattern),
         bodies: std.ArrayList(*AST),
     },
+    list: struct {
+        start: usize,
+        end: usize,
+        values: std.ArrayList(*AST),
+    },
 
     // Recursively destroy all contained ASTs
     pub fn deinit(self: *AST, allocator: std.mem.Allocator) void {
@@ -148,6 +153,12 @@ pub const AST = union(enum) {
                     body.deinit(allocator);
                 }
                 case.bodies.deinit();
+            },
+            .list => |list| {
+                for (list.values.items) |value| {
+                    value.deinit(allocator);
+                }
+                list.values.deinit();
             },
             else => {},
         }
@@ -247,6 +258,16 @@ pub const AST = union(enum) {
                     }
                 }
                 try writer.print("])", .{});
+            },
+            .list => |list| {
+                try writer.write("[");
+                for (list.values.items, 0..) |value, i| {
+                    try value.print(writer);
+                    if (i != list.values.items.len) {
+                        try writer.write(", ");
+                    }
+                }
+                try writer.write("]");
             },
         }
     }

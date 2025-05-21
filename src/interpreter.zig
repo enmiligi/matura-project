@@ -761,6 +761,9 @@ pub const Interpreter = struct {
                 }
                 return error.UnexpectedType;
             },
+            .list => {
+                return error.UnexpectedType;
+            },
         }
     }
 
