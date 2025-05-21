@@ -56,6 +56,21 @@ pub const Lexer = struct {
         } else if (std.ascii.isDigit(c)) {
             return self.numberLiteral();
         } else {
+            if (c == '\'') {
+                self.location += 1;
+                self.tokenStart += 1;
+                if (self.getChar() == '\\') {
+                    self.location += 1;
+                }
+                self.location += 1;
+                if (self.location >= self.source.len or self.getChar() != '\'') {
+                    try self.errs.errorAt(self.location, self.location, "There should be a ' to end the char.", .{});
+                    return error.InvalidChar;
+                }
+                const t = self.makeToken(.CharLiteral);
+                self.location += 1;
+                return t;
+            }
             if (c == '-' and self.source[self.location + 1] == '>') {
                 self.location += 2;
                 return self.makeToken(.Arrow);

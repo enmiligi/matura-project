@@ -2,9 +2,11 @@ let fibonacciHelper: Number a => a -> a -> Int -> a =
     lambda prev. lambda current. lambda n.
         if n > 0 then
             print current;
+            print ' ';
             fibonacciHelper current (prev + current) (n - 1)
         else
             print current;
+            print '\n';
             current
 
 let fibonacci = lambda x.

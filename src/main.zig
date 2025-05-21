@@ -140,7 +140,7 @@ pub fn main() !u8 {
     }
 
     const result = interpreter_.lookup("main").?;
-    try value.printValue(result, stdout.any());
+    try value.debugPrintValue(result, stdout.any());
 
     try stdout.print(": ", .{});
 

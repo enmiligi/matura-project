@@ -72,6 +72,10 @@ pub const AST = union(enum) {
         token: token.Token,
         value: bool,
     },
+    charConstant: struct {
+        token: token.Token,
+        value: u8,
+    },
     identifier: struct {
         token: token.Token,
     },

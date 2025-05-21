@@ -20,6 +20,7 @@ pub const TokenType = enum {
     FloatLiteral,
     IntLiteral,
     BoolLiteral,
+    CharLiteral,
     // user-defined
     Identifier,
     // Newline with no whitespace
@@ -40,6 +41,7 @@ pub const TokenType = enum {
 
 pub fn formatTokenType(tt: TokenType) []const u8 {
     const name = switch (tt) {
+        .CharLiteral => "a character",
         .Dot => "a dot",
         .Equal => "an equal sign",
         .FloatLiteral => "a decimal number",

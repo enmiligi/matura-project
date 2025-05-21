@@ -571,6 +571,28 @@ pub const Parser = struct {
         return ast;
     }
 
+    fn charLiteral(self: *Parser) !*AST {
+        const t = try self.getToken();
+        var value = t.lexeme[0];
+        if (t.lexeme[0] == '\\') {
+            value = switch (t.lexeme[1]) {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                else => {
+                    try self.errs.errorAt(t.start + 1, t.start + 2, "Invalid escape code '{s}'.", .{t.lexeme});
+                    return error.UnexpectedToken;
+                },
+            };
+        }
+        const ast = try self.allocator.create(AST);
+        ast.* = .{ .charConstant = .{
+            .token = t,
+            .value = value,
+        } };
+        return ast;
+    }
+
     // identifier ::= Identifier
     fn identifier(self: *Parser) !*AST {
         const t = try self.getToken();
@@ -829,6 +851,7 @@ pub const Parser = struct {
             token.TokenType.IntLiteral => intLiteral,
             token.TokenType.FloatLiteral => floatLiteral,
             token.TokenType.BoolLiteral => boolLiteral,
+            token.TokenType.CharLiteral => charLiteral,
             token.TokenType.LeftParen => brackets,
             token.TokenType.Identifier => identifier,
             token.TokenType.Let => letExpression,

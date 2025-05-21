@@ -6,7 +6,7 @@ const Errors = @import("./errors.zig").Errors;
 const token = @import("token.zig");
 const computeBoundaries = @import("./errors.zig").Errors.computeBoundaries;
 
-const PrimitiveType = enum { Int, Float, Bool };
+const PrimitiveType = enum { Int, Float, Bool, Char };
 
 pub const Number = struct {
     variable: *Type,
@@ -201,6 +201,9 @@ pub fn printTypeWithoutConstraints(
                 },
                 .Bool => {
                     try writer.print("Bool", .{});
+                },
+                .Char => {
+                    try writer.print("Char", .{});
                 },
             }
         },
@@ -609,7 +612,7 @@ pub const AlgorithmJ = struct {
                             .Int, .Float => {
                                 try self.unify(numB.variable, typeA);
                             },
-                            .Bool => {
+                            .Bool, .Char => {
                                 return error.CouldNotUnify;
                             },
                         }
@@ -650,7 +653,7 @@ pub const AlgorithmJ = struct {
                             .Int, .Float => {
                                 try self.unify(numA.variable, typeB);
                             },
-                            .Bool => {
+                            .Bool, .Char => {
                                 return error.CouldNotUnify;
                             },
                         }
@@ -943,14 +946,17 @@ pub const AlgorithmJ = struct {
                     return error.UnknownIdentifier;
                 }
             },
-            .intConstant => |_| {
+            .intConstant => {
                 t.data = .{ .primitive = .Int };
             },
-            .floatConstant => |_| {
+            .floatConstant => {
                 t.data = .{ .primitive = .Float };
             },
-            .boolConstant => |_| {
+            .boolConstant => {
                 t.data = .{ .primitive = .Bool };
+            },
+            .charConstant => {
+                t.data = .{ .primitive = .Char };
             },
             .prefixOp => |prefixOp| {
                 const char = prefixOp.token.lexeme[0];

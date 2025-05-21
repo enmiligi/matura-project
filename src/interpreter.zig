@@ -61,7 +61,6 @@ pub const Interpreter = struct {
 
     fn print(self: *Interpreter, arg: Value) !Value {
         try value.printValue(arg, self.stdout);
-        try self.stdout.print("\n", .{});
         const values = std.ArrayList(Value).init(self.allocator);
         const composite = try self.objects.makeConstruct("Void", values);
         return .{ .object = composite };
@@ -222,6 +221,21 @@ pub const Interpreter = struct {
                         const res = switch (op.lexeme[0]) {
                             '=' => bool1 == bool2,
                             '!' => bool1 != bool2,
+                            else => undefined,
+                        };
+                        return .{ .bool = res };
+                    },
+                    else => {
+                        return error.UnexpectedType;
+                    },
+                }
+            },
+            .char => |char1| {
+                switch (right) {
+                    .char => |char2| {
+                        const res = switch (op.lexeme[0]) {
+                            '=' => char1 == char2,
+                            '!' => char1 != char2,
                             else => undefined,
                         };
                         return .{ .bool = res };
@@ -615,6 +629,9 @@ pub const Interpreter = struct {
             },
             .floatConstant => |floatC| {
                 return .{ .float = floatC.value };
+            },
+            .charConstant => |charC| {
+                return .{ .char = charC.value };
             },
             .ifExpr => |ifExpr| {
                 const predicate = try self.eval(ifExpr.predicate);

@@ -54,7 +54,7 @@ pub const OptimizeClosures = struct {
         exclude: *std.StringHashMap(void),
     ) !void {
         switch (ast.*) {
-            .intConstant, .floatConstant, .boolConstant => {},
+            .intConstant, .floatConstant, .boolConstant, .charConstant => {},
             .identifier => |id| {
                 if (!exclude.contains(id.token.lexeme)) {
                     try found.append(id.token.lexeme);
@@ -113,7 +113,7 @@ pub const OptimizeClosures = struct {
 
     pub fn run(ast: *AST, allocator: std.mem.Allocator) !void {
         switch (ast.*) {
-            .intConstant, .floatConstant, .boolConstant, .identifier => {},
+            .intConstant, .floatConstant, .boolConstant, .charConstant, .identifier => {},
             .let => |let| {
                 try run(let.in, allocator);
                 try run(let.be, allocator);
@@ -237,7 +237,7 @@ pub const OptimizeFullyInstantiatedCalls = struct {
 
     pub fn run(ast: *AST, allocator: std.mem.Allocator) !void {
         switch (ast.*) {
-            .intConstant, .floatConstant, .boolConstant, .identifier => {},
+            .intConstant, .floatConstant, .boolConstant, .identifier, .charConstant => {},
             .let => |let| {
                 try run(let.in, allocator);
                 try run(let.be, allocator);

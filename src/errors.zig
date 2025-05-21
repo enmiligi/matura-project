@@ -57,6 +57,9 @@ pub const Errors = struct {
             .boolConstant => |bC| {
                 return .{ .start = bC.token.start, .end = bC.token.end };
             },
+            .charConstant => |cC| {
+                return .{ .start = cC.token.start, .end = cC.token.end };
+            },
             .ifExpr => |ifExpr| {
                 const end = computeBoundaries(ifExpr.elseExpr).end;
                 return .{ .start = ifExpr.start, .end = end };
@@ -240,7 +243,7 @@ pub const Errors = struct {
                                             try self.printType(leftType, leftWriter, currentTypeVar, false, topLevel);
                                             try self.printType(rightType, rightWriter, currentTypeVar, false, topLevel);
                                         },
-                                        .Bool => {
+                                        .Bool, .Char => {
                                             try self.printType(leftType, leftWriter, currentTypeVar, true, topLevel);
                                             try self.printType(rightType, rightWriter, currentTypeVar, true, topLevel);
                                         },
@@ -322,7 +325,7 @@ pub const Errors = struct {
                                             try self.printType(leftType, leftWriter, currentTypeVar, false, topLevel);
                                             try self.printType(rightType, rightWriter, currentTypeVar, false, topLevel);
                                         },
-                                        .Bool => {
+                                        .Bool, .Char => {
                                             try self.printType(leftType, leftWriter, currentTypeVar, true, topLevel);
                                             try self.printType(rightType, rightWriter, currentTypeVar, true, topLevel);
                                         },
