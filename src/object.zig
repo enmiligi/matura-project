@@ -214,12 +214,13 @@ pub const Objects = struct {
     }
 
     pub fn makeClosure(self: *Objects, argName: token.Token, bound: std.StringHashMap(Value), code: Code) !*Object {
-        const object = try self.makeObject();
-        object.content = .{ .closure = .{
+        const objectContent: ObjectContent = .{ .closure = .{
             .argName = argName,
             .bound = bound,
             .code = code,
         } };
+        const object = try self.makeObject();
+        object.content = objectContent;
         return object;
     }
 

@@ -462,9 +462,6 @@ pub const Interpreter = struct {
                                     copiedEnv,
                                     code,
                                 );
-                                // TODO: Find out why this is needed.
-                                const x = argName.lexeme;
-                                _ = x;
                                 return .{
                                     .object = closObj,
                                 };
