@@ -12,4 +12,6 @@ let fibonacciHelper: Number a => a -> a -> Int -> a =
 let fibonacci = lambda x.
     fibonacciHelper 0 1 x
 
-let main = fibonacci 20
+let main =
+    print "First 20 numbers in the fibonacci sequence:\n";
+    fibonacci 20

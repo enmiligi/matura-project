@@ -11,6 +11,21 @@ pub const Value = union(enum) {
     builtinFunction: *const fn (self: *interpreter.Interpreter, arg: Value) anyerror!Value,
 };
 
+fn debugPrintChar(char: u8, writer: std.io.AnyWriter) !void {
+    const out = switch (char) {
+        '\n' => "\\n",
+        '\r' => "\\r",
+        '\t' => "\\t",
+        '\'' => "\\'",
+        '"' => "\\\"",
+        else => {
+            try writer.print("{c}", .{char});
+            return;
+        },
+    };
+    try writer.print("{s}", .{out});
+}
+
 pub fn debugPrintValue(value: Value, writer: std.io.AnyWriter) anyerror!void {
     switch (value) {
         .float => |f| {
@@ -27,16 +42,9 @@ pub fn debugPrintValue(value: Value, writer: std.io.AnyWriter) anyerror!void {
             }
         },
         .char => |c| {
-            const out = switch (c) {
-                '\n' => "\\n",
-                '\r' => "\\r",
-                '\t' => "\\t",
-                else => {
-                    try writer.print("'{c}'", .{c});
-                    return;
-                },
-            };
-            try writer.print("'{s}'", .{out});
+            try writer.print("'", .{});
+            try debugPrintChar(c, writer);
+            try writer.print("'", .{});
         },
         .object => |obj| {
             switch (obj.content) {
@@ -61,7 +69,7 @@ pub fn debugPrintValue(value: Value, writer: std.io.AnyWriter) anyerror!void {
                         };
                         if (isString) {
                             try writer.print("\"", .{});
-                            try printValue(construct.values.items[0], writer);
+                            try debugPrintChar(construct.values.items[0].char, writer);
                         } else {
                             try writer.print("[", .{});
                             try debugPrintValue(construct.values.items[0], writer);
@@ -75,7 +83,7 @@ pub fn debugPrintValue(value: Value, writer: std.io.AnyWriter) anyerror!void {
                                             if (std.mem.eql(u8, restConstruct.name, "Cons")) {
                                                 if (!isString) try writer.print(", ", .{});
                                                 if (isString) {
-                                                    try printValue(restConstruct.values.items[0], writer);
+                                                    try debugPrintChar(restConstruct.values.items[0].char, writer);
                                                 } else {
                                                     try debugPrintValue(restConstruct.values.items[0], writer);
                                                 }
