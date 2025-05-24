@@ -66,6 +66,8 @@ pub const Interpreter = struct {
         try env.put("read", .{ .builtinFunction = &read });
         try env.put("parseInt", .{ .builtinFunction = &parseInt });
         try env.put("parseFloat", .{ .builtinFunction = &parseFloat });
+        try env.put("showInt", .{ .builtinFunction = &showInt });
+        try env.put("showFloat", .{ .builtinFunction = &showFloat });
     }
 
     fn print(self: *Interpreter, arg: Value) !Value {
@@ -108,6 +110,19 @@ pub const Interpreter = struct {
         return values;
     }
 
+    fn stringToList(self: *Interpreter, chars: []const u8) !Value {
+        var list = try self.objects.makeConstruct("Nil", .init(self.allocator));
+        for (1..chars.len + 1) |i| {
+            var values = std.ArrayList(Value).init(self.allocator);
+            try values.append(.{ .char = chars[chars.len - i] });
+            try values.append(.{ .object = list });
+            try self.pushValue(.{ .object = list });
+            list = try self.objects.makeConstruct("Cons", values);
+            self.popValue();
+        }
+        return .{ .object = list };
+    }
+
     fn parseInt(self: *Interpreter, arg: Value) !Value {
         const string = try self.listToString(arg);
         defer string.deinit();
@@ -132,6 +147,23 @@ pub const Interpreter = struct {
         var contents: std.ArrayList(Value) = .init(self.allocator);
         try contents.append(.{ .float = number });
         return .{ .object = try self.objects.makeConstruct("Some", contents) };
+    }
+
+    fn showInt(self: *Interpreter, arg: Value) !Value {
+        const string = try std.fmt.allocPrint(self.allocator, "{d}", .{arg.int});
+        defer self.allocator.free(string);
+        return self.stringToList(string);
+    }
+
+    fn showFloat(self: *Interpreter, arg: Value) !Value {
+        var string: []const u8 = undefined;
+        if (std.math.floor(arg.float) == arg.float) {
+            string = try std.fmt.allocPrint(self.allocator, "{d}.0", .{arg.float});
+        } else {
+            string = try std.fmt.allocPrint(self.allocator, "{d}", .{arg.float});
+        }
+        defer self.allocator.free(string);
+        return self.stringToList(string);
     }
 
     fn deinitEnvs(self: *Interpreter) void {
@@ -504,14 +536,16 @@ pub const Interpreter = struct {
                     },
                     .multiArgClosure => |multiClos| {
                         try self.pushValue(function);
+                        defer self.popValue();
                         const argument = try self.eval(arg);
+                        try self.pushValue(argument);
+                        defer self.popValue();
                         var copiedEnv = try multiClos.bound.clone();
                         // Arguments are stored in reverse
                         copiedEnv.put(multiClos.argNames.items[multiClos.argNames.items.len - 1].lexeme, argument) catch |err| {
                             copiedEnv.deinit();
                             return err;
                         };
-                        self.popValue();
                         if (multiClos.argNames.items.len == 1) {
                             defer copiedEnv.deinit();
                             try self.pushEnv(&copiedEnv);
@@ -854,13 +888,20 @@ pub const Interpreter = struct {
             },
             .case => |case| {
                 const caseValue = try self.eval(case.value);
+                try self.pushValue(caseValue);
+                defer self.popValue();
                 const construct = caseValue.object.content.construct;
                 for (case.patterns.items, case.bodies.items) |pattern, body| {
                     if (std.mem.eql(u8, pattern.name.lexeme, construct.name)) {
                         for (construct.values.items, pattern.values.items) |val, name| {
                             try self.set(name.lexeme, val);
+                            try self.pushValue(val);
                         }
-                        return self.eval(body);
+                        const result = self.eval(body);
+                        for (0..construct.values.items.len) |_| {
+                            self.popValue();
+                        }
+                        return result;
                     }
                 }
                 return error.UnexpectedType;

@@ -1,0 +1,5 @@
+let concat: List a -> List a -> List a =
+    lambda xs. lambda ys.
+        case xs of
+            Nil => ys
+          | Cons x rest => Cons x (concat rest ys)

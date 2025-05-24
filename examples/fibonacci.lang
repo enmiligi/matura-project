@@ -17,8 +17,8 @@ let main = lambda x.
     case parseInt (read Void) of
         None => main Void
       | Some n =>
-        print "First ";
-        print n;
-        print " numbers in the fibonacci sequence:\n";
+        print (concat
+                (concat "First " (showInt n))
+                " numbers in the fibonacci sequence:\n");
         fibonacci (n - 1);
         Void

@@ -78,6 +78,7 @@ pub fn main() !u8 {
         binDir = try std.fs.cwd().openDir(binDirName, .{});
     }
     defer binDir.close();
+
     var builtin = binDir.openDir("../lib/matura-project/builtin", .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => {
             try stderr.print("Lib folder is not in the parent folder of the binary", .{});
@@ -109,6 +110,36 @@ pub fn main() !u8 {
     }
 
     try fileParser.initBuiltins();
+
+    var stdlib = binDir.openDir("../lib/matura-project/stdlib", .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => {
+            try stderr.print("Lib folder is not in the parent folder of the binary", .{});
+            try errbw.flush();
+            return 1;
+        },
+        else => {
+            return err;
+        },
+    };
+    defer stdlib.close();
+    var libs = stdlib.iterate();
+    while (try libs.next()) |libFile| {
+        if (libFile.kind == .file) {
+            var f = try stdlib.openFile(libFile.name, .{ .mode = .read_only });
+            defer f.close();
+            if (try fileRunner.runFile(
+                f,
+                libFile.name,
+                &fileParser,
+                &algorithmJ,
+                &interpreter_,
+                &errs,
+                &errbw,
+            )) |returnCode| {
+                return returnCode;
+            }
+        }
+    }
 
     // Initialize file
     const cwd = std.fs.cwd();

@@ -41,11 +41,11 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
 
     const write_step = b.addWriteFiles();
-    const copied_dir = write_step.addCopyDirectory(b.path("builtin"), "", .{});
+    const copied_builtin = write_step.addCopyDirectory(b.path("lib"), "", .{});
     b.installDirectory(.{
         .install_dir = .lib,
-        .source_dir = copied_dir,
-        .install_subdir = "matura-project/builtin",
+        .source_dir = copied_builtin,
+        .install_subdir = "matura-project",
     });
 
     // This *creates* a Run step in the build graph, to be executed when another

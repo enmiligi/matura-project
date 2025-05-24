@@ -79,6 +79,8 @@ pub const Parser = struct {
         try self.initBuiltin("read", "Void -> List Char");
         try self.initBuiltin("parseInt", "List Char -> Option Int");
         try self.initBuiltin("parseFloat", "List Char -> Option Float");
+        try self.initBuiltin("showInt", "Int -> List Char");
+        try self.initBuiltin("showFloat", "Float -> List Char");
     }
 
     pub fn newSource(self: *Parser, source: []const u8) !void {
