@@ -8,11 +8,13 @@ const optimizer = @import("optimizer.zig");
 
 pub const Runner = struct {
     sources: std.ArrayList([]const u8),
+    statements: std.ArrayList(std.ArrayList(ast.Statement)),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) Runner {
         return .{
             .sources = .init(allocator),
+            .statements = .init(allocator),
             .allocator = allocator,
         };
     }
@@ -22,6 +24,10 @@ pub const Runner = struct {
             self.allocator.free(source);
         }
         self.sources.deinit();
+        for (self.statements.items) |statements| {
+            ast.Statement.deinitStatements(statements, self.allocator);
+        }
+        self.statements.deinit();
     }
 
     pub fn runFile(
@@ -51,7 +57,10 @@ pub const Runner = struct {
                 return err;
             },
         };
-        defer ast.Statement.deinitStatements(statements, self.allocator);
+        self.statements.append(statements) catch |err| {
+            ast.Statement.deinitStatements(statements, self.allocator);
+            return err;
+        };
         algorithmJ.depth = 0;
         for (statements.items) |*statement| {
             algorithmJ.checkStatement(statement.*) catch |err| switch (err) {

@@ -18,6 +18,7 @@ fn debugPrintChar(char: u8, writer: std.io.AnyWriter) !void {
         '\t' => "\\t",
         '\'' => "\\'",
         '"' => "\\\"",
+        '\\' => "\\\\",
         else => {
             try writer.print("{c}", .{char});
             return;
@@ -29,7 +30,11 @@ fn debugPrintChar(char: u8, writer: std.io.AnyWriter) !void {
 pub fn debugPrintValue(value: Value, writer: std.io.AnyWriter) anyerror!void {
     switch (value) {
         .float => |f| {
-            try writer.print("{d}", .{f});
+            if (f == std.math.floor(f)) {
+                try writer.print("{d}.0", .{f});
+            } else {
+                try writer.print("{d}", .{f});
+            }
         },
         .int => |i| {
             try writer.print("{d}", .{i});

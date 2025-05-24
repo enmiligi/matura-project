@@ -58,8 +58,11 @@ pub fn main() !u8 {
     var fileParser = try parser.Parser.init(allocator, &errs, &algorithmJ);
     defer fileParser.deinit();
 
+    const stdin = std.io.getStdIn().reader();
+    var stdinBW = std.io.bufferedReader(stdin);
+
     var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
-    var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv, stdout.any());
+    var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv, stdout.any(), &bw, stdinBW.reader().any());
     defer interpreter_.deinit();
 
     var fileRunner = runner.Runner.init(allocator);
@@ -140,36 +143,50 @@ pub fn main() !u8 {
         return 1;
     }
 
-    const result = interpreter_.lookup("main").?;
-    try value.debugPrintValue(result, stdout.any());
+    const vType = try type_inference.Type.init(allocator);
+    vType.data = .{ .composite = .{ .name = "Void", .args = .init(allocator) } };
+    const fType = type_inference.Type.init(allocator) catch |err| {
+        vType.deinit(allocator);
+        return err;
+    };
+    vType.rc += 1;
+    fType.data = .{ .function = .{ .from = vType, .to = vType } };
+    defer fType.deinit(allocator);
 
-    try stdout.print(": ", .{});
-
-    var currentTypeVar: usize = 0;
-    var typeVarMap = std.AutoHashMap(usize, usize).init(allocator);
-    defer typeVarMap.deinit();
-
-    const mainTypeScheme = algorithmJ.globalTypes.get("main").?;
     var mainType: *type_inference.Type = undefined;
-    switch (mainTypeScheme.*) {
+    switch (algorithmJ.globalTypes.get("main").?.*) {
         .type => |t| {
             t.rc += 1;
             mainType = t;
         },
-        .forall => |*forall| {
-            mainType = try algorithmJ.instantiate(forall);
-        },
+        .forall => |*forall| mainType = try algorithmJ.instantiate(forall),
     }
     defer mainType.deinit(allocator);
-    try type_inference.printType(
-        mainType,
-        stdout.any(),
-        &currentTypeVar,
-        &typeVarMap,
-        true,
-        allocator,
-    );
-    try stdout.print("\n", .{});
+
+    algorithmJ.unify(mainType, fType) catch |err| switch (err) {
+        error.CouldNotUnify => {
+            try stderr.print("The main function should have type Void -> Void, but it has type ", .{});
+            var currentTypeVar: usize = 0;
+            var typeVarMap = std.AutoHashMap(usize, usize).init(allocator);
+            defer typeVarMap.deinit();
+
+            try type_inference.printType(
+                mainType,
+                stdout.any(),
+                &currentTypeVar,
+                &typeVarMap,
+                true,
+                allocator,
+            );
+            try errbw.flush();
+            return 1;
+        },
+        else => {
+            return err;
+        },
+    };
+
+    try interpreter_.runMain();
 
     try bw.flush();
 

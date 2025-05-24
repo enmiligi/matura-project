@@ -208,7 +208,6 @@ pub fn printTypeWithoutConstraints(
             }
         },
         .composite => |comp| {
-            if (!topLevel) try writer.print("(", .{});
             try writer.print("{s}", .{comp.name});
             for (comp.args.items) |arg| {
                 try writer.print(" ", .{});
@@ -221,7 +220,6 @@ pub fn printTypeWithoutConstraints(
                     allocator,
                 );
             }
-            if (!topLevel) try writer.print(")", .{});
         },
         .function => |function| {
             if (!topLevel) try writer.print("(", .{});
@@ -571,7 +569,7 @@ pub const AlgorithmJ = struct {
     }
 
     // Unify typeA and typeB creating substitutions as needed
-    fn unify(self: *AlgorithmJ, typeA: *Type, typeB: *Type) !void {
+    pub fn unify(self: *AlgorithmJ, typeA: *Type, typeB: *Type) !void {
         switch (typeA.data) {
             .typeVar => |*typeVarA| {
                 // If A is a typeVar, unify its substitution if present

@@ -12,6 +12,13 @@ let fibonacciHelper: Number a => a -> a -> Int -> a =
 let fibonacci = lambda x.
     fibonacciHelper 0 1 x
 
-let main =
-    print "First 20 numbers in the fibonacci sequence:\n";
-    fibonacci 20
+let main = lambda x.
+    print "How many numbers in the fibonacci sequence?\n";
+    case parseInt (read Void) of
+        None => main Void
+      | Some n =>
+        print "First ";
+        print n;
+        print " numbers in the fibonacci sequence:\n";
+        fibonacci (n - 1);
+        Void

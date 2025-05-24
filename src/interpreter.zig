@@ -28,6 +28,8 @@ pub const Interpreter = struct {
     currentEnv: *Env,
     allocator: std.mem.Allocator,
     stdout: std.io.AnyWriter,
+    stdoutbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
+    stdin: std.io.AnyReader,
 
     argNameMap: std.StringHashMap(std.ArrayList(token.Token)),
 
@@ -35,6 +37,8 @@ pub const Interpreter = struct {
         allocator: std.mem.Allocator,
         initialEnv: *std.StringHashMap(Value),
         stdout: std.io.AnyWriter,
+        stdoutbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
+        stdin: std.io.AnyReader,
     ) !Interpreter {
         try initBuiltins(initialEnv);
         const preserveValues = try allocator.create(std.ArrayList(Value));
@@ -52,11 +56,16 @@ pub const Interpreter = struct {
             .allocator = allocator,
             .argNameMap = .init(allocator),
             .stdout = stdout,
+            .stdoutbw = stdoutbw,
+            .stdin = stdin,
         };
     }
 
     fn initBuiltins(env: *std.StringHashMap(Value)) !void {
         try env.put("print", .{ .builtinFunction = &print });
+        try env.put("read", .{ .builtinFunction = &read });
+        try env.put("parseInt", .{ .builtinFunction = &parseInt });
+        try env.put("parseFloat", .{ .builtinFunction = &parseFloat });
     }
 
     fn print(self: *Interpreter, arg: Value) !Value {
@@ -64,6 +73,65 @@ pub const Interpreter = struct {
         const values = std.ArrayList(Value).init(self.allocator);
         const composite = try self.objects.makeConstruct("Void", values);
         return .{ .object = composite };
+    }
+
+    fn read(self: *Interpreter, arg: Value) !Value {
+        _ = arg;
+        try self.stdoutbw.flush();
+        const line = try self.stdin.readUntilDelimiterOrEofAlloc(
+            self.allocator,
+            '\n',
+            std.math.maxInt(usize),
+        ) orelse "";
+        defer self.allocator.free(line);
+        var listVal = try self.objects.makeConstruct("Nil", .init(self.allocator));
+        for (1..line.len + 1) |i| {
+            var vals = std.ArrayList(Value).init(self.allocator);
+            errdefer vals.deinit();
+            try vals.append(.{ .char = line[line.len - i] });
+            try vals.append(.{ .object = listVal });
+            try self.pushValue(.{ .object = listVal });
+            listVal = try self.objects.makeConstruct("Cons", vals);
+            self.popValue();
+        }
+        return .{ .object = listVal };
+    }
+
+    fn listToString(self: *Interpreter, list: Value) !std.ArrayList(u8) {
+        var values = std.ArrayList(u8).init(self.allocator);
+        errdefer values.deinit();
+        var rest = list;
+        while (std.mem.eql(u8, rest.object.content.construct.name, "Cons")) {
+            try values.append(rest.object.content.construct.values.items[0].char);
+            rest = rest.object.content.construct.values.items[1];
+        }
+        return values;
+    }
+
+    fn parseInt(self: *Interpreter, arg: Value) !Value {
+        const string = try self.listToString(arg);
+        defer string.deinit();
+        const number: i64 = std.fmt.parseInt(i64, string.items, 10) catch {
+            return .{
+                .object = try self.objects.makeConstruct("None", .init(self.allocator)),
+            };
+        };
+        var contents: std.ArrayList(Value) = .init(self.allocator);
+        try contents.append(.{ .int = number });
+        return .{ .object = try self.objects.makeConstruct("Some", contents) };
+    }
+
+    fn parseFloat(self: *Interpreter, arg: Value) !Value {
+        const string = try self.listToString(arg);
+        defer string.deinit();
+        const number: f64 = std.fmt.parseFloat(f64, string.items) catch {
+            return .{
+                .object = try self.objects.makeConstruct("None", .init(self.allocator)),
+            };
+        };
+        var contents: std.ArrayList(Value) = .init(self.allocator);
+        try contents.append(.{ .float = number });
+        return .{ .object = try self.objects.makeConstruct("Some", contents) };
     }
 
     fn deinitEnvs(self: *Interpreter) void {
@@ -318,7 +386,7 @@ pub const Interpreter = struct {
                             else => {},
                         }
                     },
-                    .construct => {
+                    .construct => |construct1| {
                         switch (right) {
                             .object => |object2| {
                                 switch (object2.content) {
@@ -329,13 +397,30 @@ pub const Interpreter = struct {
                                             return error.UnknownIdentifier;
                                         }
                                     },
-                                    .construct => {
-                                        const res = switch (op.lexeme[0]) {
-                                            '=' => object1 == object2,
-                                            '!' => object1 != object2,
-                                            else => undefined,
-                                        };
-                                        return .{ .bool = res };
+                                    .construct => |construct2| {
+                                        switch (op.lexeme[0]) {
+                                            '=' => {
+                                                if (!std.mem.eql(u8, construct1.name, construct2.name)) {
+                                                    return .{ .bool = false };
+                                                }
+                                                var equal = true;
+                                                for (construct1.values.items, construct2.values.items) |value1, value2| {
+                                                    equal = equal and (try evalComp(op, value1, value2)).bool;
+                                                }
+                                                return .{ .bool = equal };
+                                            },
+                                            '!' => {
+                                                if (!std.mem.eql(u8, construct1.name, construct2.name)) {
+                                                    return .{ .bool = true };
+                                                }
+                                                var different = false;
+                                                for (construct1.values.items, construct2.values.items) |value1, value2| {
+                                                    different = different or (try evalComp(op, value1, value2)).bool;
+                                                }
+                                                return .{ .bool = different };
+                                            },
+                                            else => {},
+                                        }
                                     },
                                     else => {},
                                 }
@@ -825,5 +910,17 @@ pub const Interpreter = struct {
                 }
             },
         }
+    }
+
+    pub fn runMain(self: *Interpreter) !void {
+        const voidAst = try self.allocator.create(AST);
+        defer voidAst.deinit(self.allocator);
+        voidAst.* = .{ .identifier = .{ .token = .{
+            .start = 0,
+            .end = 0,
+            .lexeme = "Void",
+            .type = .Identifier,
+        } } };
+        _ = try self.evalCall(self.lookup("main").?, voidAst);
     }
 };

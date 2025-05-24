@@ -76,6 +76,9 @@ pub const Parser = struct {
             self.typeVarMap = null;
         }
         try self.initBuiltin("print", "a -> Void");
+        try self.initBuiltin("read", "Void -> List Char");
+        try self.initBuiltin("parseInt", "List Char -> Option Int");
+        try self.initBuiltin("parseFloat", "List Char -> Option Float");
     }
 
     pub fn newSource(self: *Parser, source: []const u8) !void {
@@ -188,6 +191,8 @@ pub const Parser = struct {
                 currentType.data = .{ .primitive = .Float };
             } else if (std.mem.eql(u8, tN.lexeme, "Bool")) {
                 currentType.data = .{ .primitive = .Bool };
+            } else if (std.mem.eql(u8, tN.lexeme, "Char")) {
+                currentType.data = .{ .primitive = .Char };
             } else if (self.algorithmJ.composite.get(tN.lexeme)) |compositeType| {
                 if (compositeType.numVars > 0 and !callPrecedence) {
                     try self.errs.errorAt(
@@ -219,7 +224,7 @@ pub const Parser = struct {
                     "The type {s} does not exist.",
                     .{tN.lexeme},
                 );
-                return error.InvalidType;
+                return error.UnexpectedToken;
             }
         } else if (self.peekToken().type == .LeftParen) {
             const t = try self.getToken();
@@ -239,11 +244,11 @@ pub const Parser = struct {
             );
             return error.UnexpectedToken;
         }
-        if (self.peekToken().type == .Arrow) {
+        if (callPrecedence and self.peekToken().type == .Arrow) {
             _ = try self.getToken();
             errdefer currentType.deinit(self.allocator);
             var innerRegion: errors.Region = .{ .start = 0, .end = 0 };
-            const returnType = try self.typeExpr(&innerRegion, declaredVars, callPrecedence);
+            const returnType = try self.typeExpr(&innerRegion, declaredVars, true);
             region.end = innerRegion.end;
             errdefer returnType.deinit(self.allocator);
             const argumentType = currentType;
@@ -581,6 +586,7 @@ pub const Parser = struct {
                 't' => '\t',
                 '\'' => '\'',
                 '\"' => '\"',
+                '\\' => '\\',
                 else => {
                     try self.errs.errorAt(t.start + 1, t.start + 2, "Invalid escape code '{s}'.", .{t.lexeme});
                     return error.UnexpectedToken;
