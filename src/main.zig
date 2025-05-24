@@ -17,7 +17,7 @@ const MainError = error{
 
 pub fn main() !u8 {
     // Initialize allocator for memory management
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 6 }).init;
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 20 }).init;
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
 
@@ -51,6 +51,13 @@ pub fn main() !u8 {
     };
     defer errs.deinit();
 
+    const stdin = std.io.getStdIn().reader();
+    var stdinBW = std.io.bufferedReader(stdin);
+
+    var fileRunner = runner.Runner.init(allocator);
+
+    defer fileRunner.deinit();
+
     var algorithmJ = type_inference.AlgorithmJ.init(allocator, &errs);
     defer algorithmJ.deinit();
 
@@ -58,16 +65,9 @@ pub fn main() !u8 {
     var fileParser = try parser.Parser.init(allocator, &errs, &algorithmJ);
     defer fileParser.deinit();
 
-    const stdin = std.io.getStdIn().reader();
-    var stdinBW = std.io.bufferedReader(stdin);
-
     var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
     var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv, stdout.any(), &bw, stdinBW.reader().any());
     defer interpreter_.deinit();
-
-    var fileRunner = runner.Runner.init(allocator);
-
-    defer fileRunner.deinit();
 
     // Read builtin types
     const binDirName = std.fs.path.dirname(consoleArgs[0]) orelse ".";
@@ -203,7 +203,7 @@ pub fn main() !u8 {
 
             try type_inference.printType(
                 mainType,
-                stdout.any(),
+                stderr.any(),
                 &currentTypeVar,
                 &typeVarMap,
                 true,

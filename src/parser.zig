@@ -217,6 +217,7 @@ pub const Parser = struct {
                     var _region: errors.Region = .{ .start = 0, .end = 0 };
                     const arg = try self.typeExpr(&_region, declaredVars, false);
                     try args.append(arg);
+                    region.end = _region.end;
                 }
                 currentType.data = .{ .composite = .{ .name = tN.lexeme, .args = args } };
             } else {

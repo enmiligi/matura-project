@@ -281,7 +281,6 @@ fn deinitTypeEnv(env: *TypeEnv, allocator: std.mem.Allocator) void {
     var iterator = env.iterator();
     while (iterator.next()) |entry| {
         deinitScheme(entry.value_ptr.*, allocator);
-        env.removeByPtr(entry.key_ptr);
     }
 }
 
@@ -901,7 +900,7 @@ pub const AlgorithmJ = struct {
                         computeBoundaries(value),
                         typeOfVar,
                         typeAnnotation.type,
-                        "which should be the same as this",
+                        "should be the same as this",
                         "this type is annotated.",
                         typeAnnotation.region,
                     );
@@ -924,7 +923,6 @@ pub const AlgorithmJ = struct {
 
     // The main algorithm as described in the paper
     fn run(self: *AlgorithmJ, typeEnv: *TypeEnv, ast: *AST) !*Type {
-        errdefer deinitTypeEnv(typeEnv, self.allocator);
         const t = try Type.init(self.allocator);
         switch (ast.*) {
             .identifier => |id| {
@@ -974,7 +972,7 @@ pub const AlgorithmJ = struct {
                             computeBoundaries(prefixOp.expr),
                             typeOfExpr,
                             t,
-                            "which should be the same as the type of this",
+                            "should be the same as the type of this",
                             "it is given as an argument to a prefix operator:",
                             .{ .start = prefixOp.token.start, .end = prefixOp.token.end },
                         );
@@ -1009,8 +1007,8 @@ pub const AlgorithmJ = struct {
                             try self.errors.typeComparison(
                                 computeBoundaries(op.left),
                                 leftType,
-                                t,
-                                "which should be the same as the type of this",
+                                tNumber,
+                                "should be the same as this type",
                                 "it is given as an argument to a numeric operator:",
                                 .{ .start = op.token.start, .end = op.token.end },
                             );
@@ -1189,7 +1187,7 @@ pub const AlgorithmJ = struct {
                                 .{ .start = lambda.argname.start, .end = lambda.argname.end },
                                 newTypeVar,
                                 argType.type,
-                                "which should be the same as this",
+                                "should be the same as this",
                                 "this type is annotated.",
                                 argType.region,
                             );
@@ -1493,6 +1491,7 @@ pub const AlgorithmJ = struct {
             .let => |let| {
                 if (self.globalTypes.contains(let.name.lexeme)) {
                     try self.errors.errorAt(let.name.start, let.name.end, "The name '{s}' is already used.", .{let.name.lexeme});
+                    return error.CouldNotUnify;
                 }
                 const t = try self.getLetVarType(&self.globalTypes, let.name, let.be, let.annotation);
                 errdefer deinitScheme(t, self.allocator);

@@ -3,3 +3,33 @@ let concat: List a -> List a -> List a =
         case xs of
             Nil => ys
           | Cons x rest => Cons x (concat rest ys)
+
+let get: List a -> Int -> Option a =
+    lambda xs. lambda i.
+        case xs of
+            Nil => None
+          | Cons x rest =>
+            if (i == 0) then
+                Some x
+            else if (i < 0) then
+                None
+            else
+                get rest (i - 1)
+
+let getOrDefault: List a -> Int -> a -> a =
+    lambda xs. lambda i. lambda default.
+        case get xs i of
+            None => default
+          | Some a => a
+
+let set: List a -> Int -> a -> List a =
+    lambda xs. lambda i. lambda value.
+        case xs of
+            Nil => Nil
+          | Cons x rest =>
+            if i == 0 then
+                Cons value rest
+            else if i < 0 then
+                xs
+            else
+                Cons x (set rest (i - 1) value)

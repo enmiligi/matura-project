@@ -20,14 +20,14 @@ pub const Runner = struct {
     }
 
     pub fn deinit(self: *Runner) void {
-        for (self.sources.items) |source| {
-            self.allocator.free(source);
-        }
-        self.sources.deinit();
         for (self.statements.items) |statements| {
             ast.Statement.deinitStatements(statements, self.allocator);
         }
         self.statements.deinit();
+        for (self.sources.items) |source| {
+            self.allocator.free(source);
+        }
+        self.sources.deinit();
     }
 
     pub fn runFile(

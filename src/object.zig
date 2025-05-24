@@ -182,17 +182,6 @@ pub const Objects = struct {
             o = obj.next;
             if (!obj.marked) {
                 if (GCLog) {
-                    switch (obj.content) {
-                        .construct => |construct| {
-                            if (std.mem.eql(u8, construct.name, "Cons")) {
-                                std.debug.print("{c}", .{construct.values.items[0].char});
-                                if (construct.values.items[0].char == 'F') {
-                                    //std.debug.assert(false);
-                                }
-                            }
-                        },
-                        else => {},
-                    }
                     std.debug.print("Deleted object of type {s}\n", .{obj.getType()});
                 }
                 obj.deinit(self.allocator);
