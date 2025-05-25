@@ -1,2 +1,3 @@
-# matura-project
-Custom ML-like language
+# Imp
+
+Imp is a ML-like language made for my maturity project.
