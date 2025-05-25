@@ -9,12 +9,14 @@ const optimizer = @import("optimizer.zig");
 pub const Runner = struct {
     sources: std.ArrayList([]const u8),
     statements: std.ArrayList(std.ArrayList(ast.Statement)),
+    fileNames: std.ArrayList([]const u8),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) Runner {
         return .{
             .sources = .init(allocator),
             .statements = .init(allocator),
+            .fileNames = .init(allocator),
             .allocator = allocator,
         };
     }
@@ -28,6 +30,10 @@ pub const Runner = struct {
             self.allocator.free(source);
         }
         self.sources.deinit();
+        for (self.fileNames.items) |fileName| {
+            self.allocator.free(fileName);
+        }
+        self.fileNames.deinit();
     }
 
     pub fn runFile(
@@ -40,6 +46,7 @@ pub const Runner = struct {
         errs: *errors.Errors,
         errbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
     ) !?u8 {
+        try self.fileNames.append(fileName);
         const fileContents = try file.readToEndAlloc(self.allocator, std.math.maxInt(usize));
         {
             errdefer self.allocator.free(fileContents);
@@ -79,6 +86,7 @@ pub const Runner = struct {
             };
             try optimizer.optimizeStatement(statement, self.allocator);
         }
+        interpreter_.newFile(fileName);
         for (statements.items) |statement| {
             try interpreter_.runStatement(statement);
         }

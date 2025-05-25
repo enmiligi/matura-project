@@ -6,8 +6,7 @@ const value = @import("./value.zig");
 const Value = value.Value;
 const object = @import("./object.zig");
 const errors = @import("./errors.zig");
-
-const nullToken = token.Token{ .start = 0, .end = 0, .lexeme = "", .type = .Identifier };
+const utils = @import("./utils.zig");
 
 pub const EvalError = error{
     UnknownIdentifier,
@@ -18,6 +17,9 @@ pub const EvalError = error{
 
 pub const Env = struct {
     contents: *std.StringHashMap(Value),
+    name: []const u8,
+    location: usize,
+    file: []const u8,
     next: ?*Env,
 };
 
@@ -35,6 +37,7 @@ pub const Interpreter = struct {
     stdout: std.io.AnyWriter,
     stdoutbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
     stdin: std.io.AnyReader,
+    fileName: []const u8 = "builtin",
 
     tco: bool = true,
 
@@ -55,6 +58,9 @@ pub const Interpreter = struct {
         env.* = .{
             .contents = initialEnv,
             .next = null,
+            .name = "_toplevel_",
+            .location = 0,
+            .file = "builtin",
         };
         return .{
             .objects = object.Objects.init(allocator, preserveValues, env),
@@ -68,6 +74,12 @@ pub const Interpreter = struct {
         };
     }
 
+    pub fn newFile(self: *Interpreter, fileName: []const u8) void {
+        self.fileName = fileName;
+        self.objects.file = fileName;
+        self.currentEnv.file = fileName;
+    }
+
     fn initBuiltins(env: *std.StringHashMap(Value)) !void {
         try env.put("print", .{ .builtinFunction = &print });
         try env.put("read", .{ .builtinFunction = &read });
@@ -75,6 +87,7 @@ pub const Interpreter = struct {
         try env.put("parseFloat", .{ .builtinFunction = &parseFloat });
         try env.put("showInt", .{ .builtinFunction = &showInt });
         try env.put("showFloat", .{ .builtinFunction = &showFloat });
+        try env.put("trace", .{ .builtinFunction = &trace });
     }
 
     fn print(self: *Interpreter, arg: Value) !Value {
@@ -82,6 +95,39 @@ pub const Interpreter = struct {
         const values = std.ArrayList(Value).init(self.allocator);
         const composite = try self.objects.makeConstruct("Void", values);
         return .{ .object = composite };
+    }
+
+    fn printEnvTrace(self: *Interpreter, env: *Env) !void {
+        const file = try std.fs.cwd().openFile(env.file, .{ .mode = .read_only });
+        defer file.close();
+        const fileContents = try file.readToEndAlloc(self.allocator, std.math.maxInt(usize));
+        defer self.allocator.free(fileContents);
+        var line: usize = 1;
+        var lineEnd: usize = 0;
+        var i: usize = 0;
+        while (i < fileContents.len and i <= env.location) : (i += 1) {
+            if (fileContents[i] == '\n') {
+                line += 1;
+                lineEnd = i + 1;
+            }
+        }
+        try self.stdout.print(
+            "\x1b[1m{s}:{d}:{d}\x1b[m in '\x1b[1m{s}\x1b[m'\n",
+            .{ env.file, line, i - lineEnd, env.name },
+        );
+    }
+
+    fn traceEnv(self: *Interpreter, env: *Env) !void {
+        if (env.next) |nextEnv| {
+            try self.traceEnv(nextEnv);
+        }
+        try self.printEnvTrace(env);
+    }
+
+    fn trace(self: *Interpreter, arg: Value) !Value {
+        try self.traceEnv(self.currentEnv);
+        try self.stdout.print("\n", .{});
+        return arg;
     }
 
     fn read(self: *Interpreter, arg: Value) !Value {
@@ -206,11 +252,20 @@ pub const Interpreter = struct {
         _ = self.preserveValues.pop();
     }
 
-    fn pushEnv(self: *Interpreter, map: *std.StringHashMap(Value)) !void {
+    fn pushEnv(
+        self: *Interpreter,
+        map: *std.StringHashMap(Value),
+        fileName: []const u8,
+        location: usize,
+        name: []const u8,
+    ) !void {
         const env = try self.allocator.create(Env);
         env.* = .{
             .contents = map,
             .next = self.currentEnv,
+            .name = name,
+            .file = fileName,
+            .location = location,
         };
         self.currentEnv = env;
         self.objects.currentEnv = env;
@@ -234,6 +289,20 @@ pub const Interpreter = struct {
     }
 
     inline fn set(self: *Interpreter, name: []const u8, val: Value) !void {
+        switch (val) {
+            .object => |obj| {
+                switch (obj.content) {
+                    .closure => |*closure| {
+                        closure.name = name;
+                    },
+                    .multiArgClosure => |*multiClosure| {
+                        multiClosure.name = name;
+                    },
+                    else => {},
+                }
+            },
+            else => {},
+        }
         try self.currentEnv.contents.put(name, val);
     }
 
@@ -501,6 +570,9 @@ pub const Interpreter = struct {
             try self.set(clos.argName.lexeme, argument);
             switch (clos.code) {
                 .ast => |ast| {
+                    self.currentEnv.file = clos.fileName;
+                    self.currentEnv.location = utils.computeBoundaries(ast).start;
+                    self.currentEnv.name = clos.name;
                     return .{ .ast = ast };
                 },
                 .constructor => |constructor| {
@@ -524,7 +596,11 @@ pub const Interpreter = struct {
         var copiedEnv = try clos.bound.clone();
         defer copiedEnv.deinit();
         try copiedEnv.put(clos.argName.lexeme, argument);
-        try self.pushEnv(&copiedEnv);
+        const location = switch (clos.code) {
+            .ast => |ast| utils.computeBoundaries(ast).start,
+            .constructor => 0,
+        };
+        try self.pushEnv(&copiedEnv, clos.fileName, location, clos.name);
         defer self.popEnv();
         switch (clos.code) {
             .ast => |ast| {
@@ -572,6 +648,9 @@ pub const Interpreter = struct {
                             try self.set(multiClos.argNames.items[0].lexeme, argument);
                             switch (multiClos.code) {
                                 .ast => |ast| {
+                                    self.currentEnv.file = multiClos.fileName;
+                                    self.currentEnv.location = utils.computeBoundaries(ast).start;
+                                    self.currentEnv.name = multiClos.name;
                                     return .{ .ast = ast };
                                 },
                                 .constructor => |constructor| {
@@ -600,7 +679,11 @@ pub const Interpreter = struct {
                         };
                         if (multiClos.argNames.items.len == 1) {
                             defer copiedEnv.deinit();
-                            try self.pushEnv(&copiedEnv);
+                            const location = switch (multiClos.code) {
+                                .ast => |ast| utils.computeBoundaries(ast).start,
+                                .constructor => 0,
+                            };
+                            try self.pushEnv(&copiedEnv, multiClos.fileName, location, multiClos.name);
                             defer self.popEnv();
                             switch (multiClos.code) {
                                 .ast => |ast| {
@@ -709,6 +792,9 @@ pub const Interpreter = struct {
                             }
                             switch (multiClos.code) {
                                 .ast => |ast| {
+                                    self.currentEnv.file = multiClos.fileName;
+                                    self.currentEnv.location = utils.computeBoundaries(ast).start;
+                                    self.currentEnv.name = multiClos.name;
                                     return .{ .ast = ast };
                                 },
                                 .constructor => |constructor| {
@@ -754,7 +840,11 @@ pub const Interpreter = struct {
                         self.popValue();
                         if (numArgs >= multiClos.argNames.items.len) {
                             defer copiedEnv.deinit();
-                            try self.pushEnv(&copiedEnv);
+                            const location = switch (multiClos.code) {
+                                .ast => |ast| utils.computeBoundaries(ast).start,
+                                .constructor => 0,
+                            };
+                            try self.pushEnv(&copiedEnv, multiClos.fileName, location, multiClos.name);
                             defer self.popEnv();
                             var result: Value = undefined;
                             switch (multiClos.code) {
@@ -896,6 +986,7 @@ pub const Interpreter = struct {
                     toEval = let.in;
                 },
                 .call => |call| {
+                    self.currentEnv.location = utils.computeBoundaries(toEval).start;
                     const function = try self.eval(call.function, false);
                     switch (try self.evalCall(function, call.arg, tailPosition)) {
                         .ast => |restAst| {
@@ -907,6 +998,7 @@ pub const Interpreter = struct {
                     }
                 },
                 .callMult => |*callMult| {
+                    self.currentEnv.location = utils.computeBoundaries(toEval).start;
                     const function = try self.eval(callMult.function, false);
                     switch (try self.evalCallMult(function, &callMult.args, callMult.args.items.len, tailPosition)) {
                         .ast => |restAst| {
@@ -947,6 +1039,10 @@ pub const Interpreter = struct {
                 },
                 .operator => |op| {
                     const left = try self.eval(op.left, false);
+                    if (op.token.lexeme[0] == ';') {
+                        toEval = op.right;
+                        continue;
+                    }
                     try self.pushValue(left);
                     const right = try self.eval(op.right, false);
                     self.popValue();
@@ -956,9 +1052,6 @@ pub const Interpreter = struct {
                         },
                         '<', '>', '=', '!' => {
                             return evalComp(op.token, left, right);
-                        },
-                        ';' => {
-                            return right;
                         },
                         else => {
                             return undefined;

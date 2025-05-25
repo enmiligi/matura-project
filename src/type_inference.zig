@@ -4,7 +4,7 @@ const TypeAnnotation = @import("./ast.zig").TypeAnnotation;
 const Statement = @import("./ast.zig").Statement;
 const Errors = @import("./errors.zig").Errors;
 const token = @import("token.zig");
-const computeBoundaries = @import("./errors.zig").Errors.computeBoundaries;
+const computeBoundaries = @import("./utils.zig").computeBoundaries;
 
 const PrimitiveType = enum { Int, Float, Bool, Char };
 

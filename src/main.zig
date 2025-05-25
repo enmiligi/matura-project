@@ -95,9 +95,14 @@ pub fn main() !u8 {
         if (builtinFile.kind == .file) {
             var f = try builtin.openFile(builtinFile.name, .{ .mode = .read_only });
             defer f.close();
+            const fileName = try std.fs.path.resolve(allocator, &.{
+                binDirName,
+                "../lib/matura-project/builtin",
+                builtinFile.name,
+            });
             if (try fileRunner.runFile(
                 f,
-                builtinFile.name,
+                fileName,
                 &fileParser,
                 &algorithmJ,
                 &interpreter_,
@@ -127,9 +132,14 @@ pub fn main() !u8 {
         if (libFile.kind == .file) {
             var f = try stdlib.openFile(libFile.name, .{ .mode = .read_only });
             defer f.close();
+            const fileName = try std.fs.path.resolve(allocator, &.{
+                binDirName,
+                "../lib/matura-project/stdlib",
+                libFile.name,
+            });
             if (try fileRunner.runFile(
                 f,
-                libFile.name,
+                fileName,
                 &fileParser,
                 &algorithmJ,
                 &interpreter_,
@@ -156,9 +166,11 @@ pub fn main() !u8 {
     };
     defer file.close();
 
+    const fileName = try std.fs.path.resolve(allocator, &.{consoleArgs[1]});
+
     if (try fileRunner.runFile(
         file,
-        consoleArgs[1],
+        fileName,
         &fileParser,
         &algorithmJ,
         &interpreter_,

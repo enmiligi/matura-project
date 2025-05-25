@@ -8,6 +8,7 @@ const Statement = _ast.Statement;
 const Pattern = _ast.Pattern;
 const errors = @import("./errors.zig");
 const type_inference = @import("./type_inference.zig");
+const utils = @import("./utils.zig");
 
 const Precedence = usize;
 const PrefixParseFn = *const fn (self: *Parser) anyerror!*AST;
@@ -55,7 +56,7 @@ pub const Parser = struct {
 
     fn initBuiltin(self: *Parser, name: []const u8, tExpr: []const u8) !void {
         try self.newSource(tExpr);
-        var region: errors.Region = .{ .start = 0, .end = 0 };
+        var region: utils.Region = .{ .start = 0, .end = 0 };
         const t = try self.typeExpr(&region, false, true);
         const tS = self.algorithmJ.generalise(t, 0) catch |err| {
             t.deinit(self.allocator);
@@ -81,6 +82,7 @@ pub const Parser = struct {
         try self.initBuiltin("parseFloat", "List Char -> Option Float");
         try self.initBuiltin("showInt", "Int -> List Char");
         try self.initBuiltin("showFloat", "Float -> List Char");
+        try self.initBuiltin("trace", "Void -> Void");
     }
 
     pub fn newSource(self: *Parser, source: []const u8) !void {
@@ -139,7 +141,7 @@ pub const Parser = struct {
         return null;
     }
 
-    pub fn typeExpr(self: *Parser, region: *errors.Region, declaredVars: bool, callPrecedence: bool) !*type_inference.Type {
+    pub fn typeExpr(self: *Parser, region: *utils.Region, declaredVars: bool, callPrecedence: bool) !*type_inference.Type {
         var start: usize = 0;
         while (try self.constraint()) |constraintStart| {
             if (start == 0) {
@@ -214,7 +216,7 @@ pub const Parser = struct {
                 }
                 var i: usize = 0;
                 while (i < compositeType.numVars) : (i += 1) {
-                    var _region: errors.Region = .{ .start = 0, .end = 0 };
+                    var _region: utils.Region = .{ .start = 0, .end = 0 };
                     const arg = try self.typeExpr(&_region, declaredVars, false);
                     try args.append(arg);
                     region.end = _region.end;
@@ -234,7 +236,7 @@ pub const Parser = struct {
             if (region.start == 0) {
                 region.start = t.start;
             }
-            var r: errors.Region = .{ .start = 0, .end = 0 };
+            var r: utils.Region = .{ .start = 0, .end = 0 };
             currentType = try self.typeExpr(&r, declaredVars, true);
             errdefer currentType.deinit(self.allocator);
             region.end = (try self.expectToken(.RightParen)).end;
@@ -250,7 +252,7 @@ pub const Parser = struct {
         if (callPrecedence and self.peekToken().type == .Arrow) {
             _ = try self.getToken();
             errdefer currentType.deinit(self.allocator);
-            var innerRegion: errors.Region = .{ .start = 0, .end = 0 };
+            var innerRegion: utils.Region = .{ .start = 0, .end = 0 };
             const returnType = try self.typeExpr(&innerRegion, declaredVars, true);
             region.end = innerRegion.end;
             errdefer returnType.deinit(self.allocator);
@@ -361,7 +363,7 @@ pub const Parser = struct {
         }
         if (self.peekToken().type == .Colon) {
             _ = try self.getToken();
-            var typeRegion: errors.Region = .{ .start = 0, .end = 0 };
+            var typeRegion: utils.Region = .{ .start = 0, .end = 0 };
             self.typeVarMap = .init(self.allocator);
             defer {
                 var iterator = self.typeVarMap.?.valueIterator();
@@ -397,7 +399,7 @@ pub const Parser = struct {
                 }
                 args.deinit();
             }
-            var region: errors.Region = .{ .start = 0, .end = 0 };
+            var region: utils.Region = .{ .start = 0, .end = 0 };
             while (self.peekToken().type == .Identifier or self.peekToken().type == .LeftParen) {
                 try args.append(try self.typeExpr(&region, true, false));
             }
@@ -684,7 +686,7 @@ pub const Parser = struct {
         }
         if (self.peekToken().type == .Colon) {
             _ = try self.getToken();
-            var typeRegion: errors.Region = .{ .start = 0, .end = 0 };
+            var typeRegion: utils.Region = .{ .start = 0, .end = 0 };
             self.typeVarMap = .init(self.allocator);
             defer {
                 var iterator = self.typeVarMap.?.valueIterator();
@@ -734,7 +736,7 @@ pub const Parser = struct {
         }
         if (self.peekToken().type == .Colon) {
             _ = try self.getToken();
-            var typeRegion: errors.Region = .{ .start = 0, .end = 0 };
+            var typeRegion: utils.Region = .{ .start = 0, .end = 0 };
             self.typeVarMap = .init(self.allocator);
             defer {
                 var iterator = self.typeVarMap.?.valueIterator();

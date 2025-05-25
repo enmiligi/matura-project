@@ -2,7 +2,7 @@ const std = @import("std");
 const token = @import("./token.zig");
 const Type = @import("./type_inference.zig").Type;
 const type_inference = @import("./type_inference.zig");
-const Region = @import("./errors.zig").Region;
+const Region = @import("./utils.zig").Region;
 
 pub const TypeAnnotation = struct {
     type: *Type,

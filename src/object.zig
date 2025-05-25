@@ -13,12 +13,16 @@ pub const Closure = struct {
     argName: token.Token,
     bound: std.StringHashMap(Value),
     code: Code,
+    fileName: []const u8,
+    name: []const u8,
 };
 
 pub const MultiArgClosure = struct {
     argNames: std.ArrayList(token.Token),
     bound: std.StringHashMap(Value),
     code: Code,
+    fileName: []const u8,
+    name: []const u8,
 };
 
 pub const Constructor = struct {
@@ -81,6 +85,8 @@ pub const Objects = struct {
     objCount: usize = 0,
     objCountUntilGC: usize = 100,
 
+    file: []const u8,
+
     pub fn init(
         allocator: std.mem.Allocator,
         preserveValues: *std.ArrayList(Value),
@@ -90,6 +96,7 @@ pub const Objects = struct {
             .allocator = allocator,
             .preserveValues = preserveValues,
             .currentEnv = currentEnv,
+            .file = "builtin",
         };
     }
 
@@ -218,6 +225,8 @@ pub const Objects = struct {
             .argName = argName,
             .bound = bound,
             .code = code,
+            .fileName = self.file,
+            .name = "_lambda_",
         } };
         const object = try self.makeObject();
         object.content = objectContent;
@@ -230,6 +239,8 @@ pub const Objects = struct {
             .argNames = argNames,
             .bound = bound,
             .code = code,
+            .fileName = self.file,
+            .name = "_lambda_",
         } };
         return object;
     }

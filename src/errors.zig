@@ -2,11 +2,7 @@ const std = @import("std");
 const Token = @import("./token.zig").Token;
 const type_inference = @import("./type_inference.zig");
 const AST = @import("./ast.zig").AST;
-
-pub const Region = struct {
-    start: usize,
-    end: usize,
-};
+const utils = @import("./utils.zig");
 
 pub const Errors = struct {
     fileName: []const u8,
@@ -45,74 +41,9 @@ pub const Errors = struct {
         try self.printYellow("{s}\n", .{contents});
     }
 
-    // Calculate the start and end of the code corresponding to the node of the AST
-    pub fn computeBoundaries(ast: *AST) Region {
-        switch (ast.*) {
-            .intConstant => |iC| {
-                return .{ .start = iC.token.start, .end = iC.token.end };
-            },
-            .floatConstant => |fC| {
-                return .{ .start = fC.token.start, .end = fC.token.end };
-            },
-            .boolConstant => |bC| {
-                return .{ .start = bC.token.start, .end = bC.token.end };
-            },
-            .charConstant => |cC| {
-                return .{ .start = cC.token.start, .end = cC.token.end };
-            },
-            .ifExpr => |ifExpr| {
-                const end = computeBoundaries(ifExpr.elseExpr).end;
-                return .{ .start = ifExpr.start, .end = end };
-            },
-            .lambda => |lambda| {
-                const end = computeBoundaries(lambda.expr).end;
-                return .{ .start = lambda.start, .end = end };
-            },
-            .lambdaMult => |lambdaMult| {
-                const end = computeBoundaries(lambdaMult.expr).end;
-                return .{ .start = lambdaMult.start, .end = end };
-            },
-            .call => |call| {
-                const end = computeBoundaries(call.arg).end;
-                const start = computeBoundaries(call.function).start;
-                return .{ .start = start, .end = end };
-            },
-            .callMult => |callMult| {
-                const end = computeBoundaries(callMult.args.items[0]).end;
-                const start = computeBoundaries(callMult.function).start;
-                return .{ .start = start, .end = end };
-            },
-            .let => |let| {
-                const end = computeBoundaries(let.in).end;
-                return .{ .start = let.start, .end = end };
-            },
-            .identifier => |id| {
-                return .{ .start = id.token.start, .end = id.token.end };
-            },
-            .operator => |op| {
-                const start = computeBoundaries(op.left).start;
-                const end = computeBoundaries(op.right).end;
-                return .{ .start = start, .end = end };
-            },
-            .prefixOp => |prefixOp| {
-                return .{
-                    .start = prefixOp.token.start,
-                    .end = computeBoundaries(prefixOp.expr).end,
-                };
-            },
-            .case => |case| {
-                const lastBody = case.bodies.items[case.bodies.items.len - 1];
-                return .{ .start = case.start, .end = computeBoundaries(lastBody).end };
-            },
-            .list => |list| {
-                return .{ .start = list.start, .end = list.end };
-            },
-        }
-    }
-
     // Print the first and last line of code of the Region
     // and indicate the subsequence with carets (^)
-    fn indicateRegion(self: *Errors, region: Region, comptime msg: []const u8, args: anytype, err: bool) !void {
+    fn indicateRegion(self: *Errors, region: utils.Region, comptime msg: []const u8, args: anytype, err: bool) !void {
         var startLine: usize = 0;
         var startOfLine: usize = 0;
         var endOfLine: usize = 0;
@@ -160,7 +91,7 @@ pub const Errors = struct {
     }
 
     fn indicateAST(self: *Errors, ast: *AST, comptime msg: []const u8, args: anytype, err: bool) !void {
-        try self.indicateRegion(computeBoundaries(ast), msg, args, err);
+        try self.indicateRegion(utils.computeBoundaries(ast), msg, args, err);
     }
 
     // Errors are printed in red and in bold
@@ -458,12 +389,12 @@ pub const Errors = struct {
     // This error is used when two types should be equal for various reasons
     pub fn typeComparison(
         self: *Errors,
-        codeRegion: Region,
+        codeRegion: utils.Region,
         leftType: *type_inference.Type,
         rightType: *type_inference.Type,
         err: []const u8,
         reason: []const u8,
-        reasonAt: Region,
+        reasonAt: utils.Region,
     ) !void {
         const comparedTypes = try self.stringCompareTypes(leftType, rightType);
         defer comparedTypes.left.deinit();
@@ -496,11 +427,11 @@ pub const Errors = struct {
         self: *Errors,
         ast: *AST,
         variableType: *type_inference.Type,
-        annotatedRegion: Region,
+        annotatedRegion: utils.Region,
     ) !void {
         try self.indicateRegion(annotatedRegion, "This type is annotated", .{}, true);
         try self.indicateRegion(
-            computeBoundaries(ast),
+            utils.computeBoundaries(ast),
             "which is more general than the type of this argument",
             .{},
             false,

@@ -3,6 +3,7 @@ let fibonacciHelper: Number a => a -> a -> Int -> a =
         if n > 0 then
             print current;
             print " ";
+            trace Void;
             fibonacciHelper current (prev + current) (n - 1)
         else
             print current;
