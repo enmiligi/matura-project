@@ -66,7 +66,14 @@ pub fn main() !u8 {
     defer fileParser.deinit();
 
     var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
-    var interpreter_ = try interpreter.Interpreter.init(allocator, &initialEnv, stdout.any(), &bw, stdinBW.reader().any());
+    var interpreter_ = try interpreter.Interpreter.init(
+        allocator,
+        &initialEnv,
+        stdout.any(),
+        &bw,
+        stdinBW.reader().any(),
+        stderr.any(),
+    );
     defer interpreter_.deinit();
 
     // Read builtin types
@@ -229,7 +236,15 @@ pub fn main() !u8 {
         },
     };
 
-    try interpreter_.runMain();
+    interpreter_.runMain() catch |err| switch (err) {
+        error.Overflow => {
+            try errbw.flush();
+            return 1;
+        },
+        else => {
+            return err;
+        },
+    };
 
     try bw.flush();
 

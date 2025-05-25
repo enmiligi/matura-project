@@ -88,7 +88,15 @@ pub const Runner = struct {
         }
         interpreter_.newFile(fileName);
         for (statements.items) |statement| {
-            try interpreter_.runStatement(statement);
+            interpreter_.runStatement(statement) catch |err| switch (err) {
+                error.Overflow => {
+                    try errbw.flush();
+                    return 1;
+                },
+                else => {
+                    return err;
+                },
+            };
         }
         return null;
     }

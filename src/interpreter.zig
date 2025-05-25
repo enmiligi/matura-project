@@ -10,6 +10,7 @@ const utils = @import("./utils.zig");
 
 pub const EvalError = error{
     UnknownIdentifier,
+    Overflow,
 
     // This should never happen because of the type inference/checking
     UnexpectedType,
@@ -36,6 +37,7 @@ pub const Interpreter = struct {
     allocator: std.mem.Allocator,
     stdout: std.io.AnyWriter,
     stdoutbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
+    stderr: std.io.AnyWriter,
     stdin: std.io.AnyReader,
     fileName: []const u8 = "builtin",
 
@@ -49,6 +51,7 @@ pub const Interpreter = struct {
         stdout: std.io.AnyWriter,
         stdoutbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
         stdin: std.io.AnyReader,
+        stderr: std.io.AnyWriter,
     ) !Interpreter {
         try initBuiltins(initialEnv);
         const preserveValues = try allocator.create(std.ArrayList(Value));
@@ -71,6 +74,7 @@ pub const Interpreter = struct {
             .stdout = stdout,
             .stdoutbw = stdoutbw,
             .stdin = stdin,
+            .stderr = stderr,
         };
     }
 
@@ -97,7 +101,7 @@ pub const Interpreter = struct {
         return .{ .object = composite };
     }
 
-    fn printEnvTrace(self: *Interpreter, env: *Env) !void {
+    fn printEnvTrace(self: *Interpreter, env: *Env, isError: bool) !void {
         const file = try std.fs.cwd().openFile(env.file, .{ .mode = .read_only });
         defer file.close();
         const fileContents = try file.readToEndAlloc(self.allocator, std.math.maxInt(usize));
@@ -111,23 +115,31 @@ pub const Interpreter = struct {
                 lineEnd = i + 1;
             }
         }
-        try self.stdout.print(
+        const writer = if (isError) self.stderr else self.stdout;
+        try writer.print(
             "\x1b[1m{s}:{d}:{d}\x1b[m in '\x1b[1m{s}\x1b[m'\n",
             .{ env.file, line, i - lineEnd, env.name },
         );
     }
 
-    fn traceEnv(self: *Interpreter, env: *Env) !void {
+    fn traceEnv(self: *Interpreter, env: *Env, isError: bool) !void {
         if (env.next) |nextEnv| {
-            try self.traceEnv(nextEnv);
+            try self.traceEnv(nextEnv, isError);
         }
-        try self.printEnvTrace(env);
+        try self.printEnvTrace(env, isError);
     }
 
     fn trace(self: *Interpreter, arg: Value) !Value {
-        try self.traceEnv(self.currentEnv);
+        try self.traceEnv(self.currentEnv, false);
         try self.stdout.print("\n", .{});
         return arg;
+    }
+
+    fn runtimeError(self: *Interpreter, msg: []const u8) !void {
+        try self.stdoutbw.flush();
+        try self.stderr.print("\n", .{});
+        try self.traceEnv(self.currentEnv, true);
+        try self.stderr.print("\x1b[31;1m{s}\x1b[m\n", .{msg});
     }
 
     fn read(self: *Interpreter, arg: Value) !Value {
@@ -311,18 +323,44 @@ pub const Interpreter = struct {
     }
 
     // When numbers are added, subtracted, multiplied or divided
-    fn evalNumberOp(op: token.Token, left: Value, right: Value) !Value {
+    fn evalNumberOp(self: *Interpreter, op: token.Token, left: Value, right: Value) !Value {
         switch (left) {
             .int => |int1| {
                 switch (right) {
                     .int => |int2| {
-                        const res = switch (op.lexeme[0]) {
-                            '+' => int1 + int2,
-                            '-' => int1 - int2,
-                            '*' => int1 * int2,
-                            '/' => @divFloor(int1, int2),
-                            else => undefined,
-                        };
+                        var res: i64 = undefined;
+                        switch (op.lexeme[0]) {
+                            '+' => {
+                                const sum = @addWithOverflow(int1, int2);
+                                if (sum[1] != 0) {
+                                    try self.runtimeError("Adding overflowed");
+                                    return error.Overflow;
+                                }
+                                res = sum[0];
+                            },
+                            '-' => {
+                                const difference = @subWithOverflow(int1, int2);
+                                if (difference[1] != 0) {
+                                    try self.runtimeError("Subtracting overflowed");
+                                    return error.Overflow;
+                                }
+                                res = difference[0];
+                            },
+                            '*' => {
+                                const product = @mulWithOverflow(int1, int2);
+                                if (product[1] != 0) {
+                                    try self.runtimeError("Multiplying overflowed");
+                                    return error.Overflow;
+                                }
+                                res = product[0];
+                            },
+                            '/' => {
+                                res = @divFloor(int1, int2);
+                            },
+                            else => {
+                                res = undefined;
+                            },
+                        }
                         return .{ .int = res };
                     },
                     else => {
@@ -1048,7 +1086,7 @@ pub const Interpreter = struct {
                     self.popValue();
                     switch (op.token.lexeme[0]) {
                         '+', '-', '*', '/' => {
-                            return evalNumberOp(op.token, left, right);
+                            return self.evalNumberOp(op.token, left, right);
                         },
                         '<', '>', '=', '!' => {
                             return evalComp(op.token, left, right);
