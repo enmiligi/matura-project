@@ -1,0 +1,11 @@
+let factorialHelper = lambda n. lambda acc.
+    if n < 2 then
+        acc
+    else
+        factorialHelper (n - 1) (n * acc)
+
+let factorial = lambda n.
+    factorialHelper n 1
+
+let main = lambda x.
+    print (factorial 20)

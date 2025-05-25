@@ -21,6 +21,11 @@ pub const Env = struct {
     next: ?*Env,
 };
 
+const ToDo = union(enum) {
+    value: Value,
+    ast: *AST,
+};
+
 pub const Interpreter = struct {
     objects: object.Objects,
     // This is a stack of Values preserved while collecting garbage
@@ -30,6 +35,8 @@ pub const Interpreter = struct {
     stdout: std.io.AnyWriter,
     stdoutbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
     stdin: std.io.AnyReader,
+
+    tco: bool = true,
 
     argNameMap: std.StringHashMap(std.ArrayList(token.Token)),
 
@@ -222,7 +229,6 @@ pub const Interpreter = struct {
             if (env.next) |nextEnv| {
                 env = nextEnv;
             }
-            return null;
         }
         return env.contents.get(name);
     }
@@ -487,18 +493,42 @@ pub const Interpreter = struct {
     }
 
     // Evaluate a closure given an argument
-    fn evalClosure(self: *Interpreter, function: Value, clos: object.Closure, arg: *AST) !Value {
+    fn evalClosure(self: *Interpreter, function: Value, clos: object.Closure, arg: *AST, tailPosition: bool) !ToDo {
         try self.pushValue(function);
-        const argument = try self.eval(arg);
+        const argument = try self.eval(arg, false);
+        self.popValue();
+        if (tailPosition and self.tco) {
+            try self.set(clos.argName.lexeme, argument);
+            switch (clos.code) {
+                .ast => |ast| {
+                    return .{ .ast = ast };
+                },
+                .constructor => |constructor| {
+                    var contents = std.ArrayList(Value).init(self.allocator);
+                    errdefer contents.deinit();
+                    for (0..constructor.numArgs) |i| {
+                        const argName = try std.fmt.allocPrint(
+                            self.allocator,
+                            "_{s}{d}",
+                            .{ constructor.name, i },
+                        );
+                        defer self.allocator.free(argName);
+                        try contents.append(self.lookup(argName).?);
+                    }
+                    return .{ .value = .{
+                        .object = try self.objects.makeConstruct(constructor.name, contents),
+                    } };
+                },
+            }
+        }
         var copiedEnv = try clos.bound.clone();
         defer copiedEnv.deinit();
         try copiedEnv.put(clos.argName.lexeme, argument);
-        self.popValue();
         try self.pushEnv(&copiedEnv);
         defer self.popEnv();
         switch (clos.code) {
             .ast => |ast| {
-                return self.eval(ast);
+                return .{ .value = try self.eval(ast, true) };
             },
             .constructor => |constructor| {
                 var contents = std.ArrayList(Value).init(self.allocator);
@@ -512,48 +542,37 @@ pub const Interpreter = struct {
                     defer self.allocator.free(argName);
                     try contents.append(self.lookup(argName).?);
                 }
-                return .{
+                return .{ .value = .{
                     .object = try self.objects.makeConstruct(constructor.name, contents),
-                };
+                } };
             },
         }
     }
 
     // Evaluate a call with a single argument
-    fn evalCall(self: *Interpreter, function: Value, arg: *AST) !Value {
+    fn evalCall(self: *Interpreter, function: Value, arg: *AST, tailPosition: bool) !ToDo {
         switch (function) {
             .object => |obj| {
                 switch (obj.content) {
                     .closure => |closure| {
-                        return self.evalClosure(function, closure, arg);
+                        return self.evalClosure(function, closure, arg, tailPosition);
                     },
                     .recurse => |rec| {
                         if (rec) |recVal| {
-                            return self.evalCall(recVal, arg);
+                            return self.evalCall(recVal, arg, tailPosition);
                         } else {
                             return error.UnknownIdentifier;
                         }
                     },
                     .multiArgClosure => |multiClos| {
                         try self.pushValue(function);
-                        defer self.popValue();
-                        const argument = try self.eval(arg);
-                        try self.pushValue(argument);
-                        defer self.popValue();
-                        var copiedEnv = try multiClos.bound.clone();
-                        // Arguments are stored in reverse
-                        copiedEnv.put(multiClos.argNames.items[multiClos.argNames.items.len - 1].lexeme, argument) catch |err| {
-                            copiedEnv.deinit();
-                            return err;
-                        };
-                        if (multiClos.argNames.items.len == 1) {
-                            defer copiedEnv.deinit();
-                            try self.pushEnv(&copiedEnv);
-                            defer self.popEnv();
+                        const argument = try self.eval(arg, false);
+                        self.popValue();
+                        if (tailPosition and self.tco and multiClos.argNames.items.len == 1) {
+                            try self.set(multiClos.argNames.items[0].lexeme, argument);
                             switch (multiClos.code) {
                                 .ast => |ast| {
-                                    const result = try self.eval(ast);
-                                    return result;
+                                    return .{ .ast = ast };
                                 },
                                 .constructor => |constructor| {
                                     var contents = std.ArrayList(Value).init(self.allocator);
@@ -567,29 +586,67 @@ pub const Interpreter = struct {
                                         defer self.allocator.free(argName);
                                         try contents.append(self.lookup(argName).?);
                                     }
-                                    return .{
+                                    return .{ .value = .{
                                         .object = try self.objects.makeConstruct(constructor.name, contents),
-                                    };
+                                    } };
+                                },
+                            }
+                        }
+                        var copiedEnv = try multiClos.bound.clone();
+                        // Arguments are stored in reverse
+                        copiedEnv.put(multiClos.argNames.items[multiClos.argNames.items.len - 1].lexeme, argument) catch |err| {
+                            copiedEnv.deinit();
+                            return err;
+                        };
+                        if (multiClos.argNames.items.len == 1) {
+                            defer copiedEnv.deinit();
+                            try self.pushEnv(&copiedEnv);
+                            defer self.popEnv();
+                            switch (multiClos.code) {
+                                .ast => |ast| {
+                                    const result = try self.eval(ast, true);
+                                    return .{ .value = result };
+                                },
+                                .constructor => |constructor| {
+                                    var contents = std.ArrayList(Value).init(self.allocator);
+                                    errdefer contents.deinit();
+                                    for (0..constructor.numArgs) |i| {
+                                        const argName = try std.fmt.allocPrint(
+                                            self.allocator,
+                                            "_{s}{d}",
+                                            .{ constructor.name, i },
+                                        );
+                                        defer self.allocator.free(argName);
+                                        try contents.append(self.lookup(argName).?);
+                                    }
+                                    return .{ .value = .{
+                                        .object = try self.objects.makeConstruct(constructor.name, contents),
+                                    } };
                                 },
                             }
                         } else {
                             if (multiClos.argNames.items.len == 2) {
                                 const argName = multiClos.argNames.items[0];
                                 const code = multiClos.code;
+                                try self.pushValue(argument);
                                 const closObj = try self.objects.makeClosure(
                                     argName,
                                     copiedEnv,
                                     code,
                                 );
-                                return .{
+                                self.popValue();
+                                return .{ .value = .{
                                     .object = closObj,
-                                };
+                                } };
                             }
                             var copiedArgs = try multiClos.argNames.clone();
                             _ = copiedArgs.pop();
-                            return .{
-                                .object = try self.objects.makeMultiArgClosure(copiedArgs, copiedEnv, multiClos.code),
-                            };
+                            try self.pushValue(argument);
+                            const multiArgClos = try self.objects.makeMultiArgClosure(copiedArgs, copiedEnv, multiClos.code);
+                            self.popValue();
+                            return .{ .value = .{
+                                .object = multiArgClos,
+                            } };
                         }
                     },
                     else => {
@@ -598,8 +655,8 @@ pub const Interpreter = struct {
                 }
             },
             .builtinFunction => |builtin| {
-                const argument = try self.eval(arg);
-                return builtin(self, argument);
+                const argument = try self.eval(arg, false);
+                return .{ .value = try builtin(self, argument) };
             },
             else => {
                 return error.UnexpectedType;
@@ -608,50 +665,88 @@ pub const Interpreter = struct {
     }
 
     // Evaluate call with multiple arguments
-    fn evalCallMult(self: *Interpreter, function: Value, args: *std.ArrayList(*AST)) !Value {
+    fn evalCallMult(self: *Interpreter, function: Value, args: *std.ArrayList(*AST), endI: usize, tailPosition: bool) !ToDo {
         switch (function) {
             .object => |obj| {
                 switch (obj.content) {
                     .closure => |closure| {
                         // Arguments are stored in reverse
-                        const result = try self.evalClosure(function, closure, args.items[args.items.len - 1]);
-                        if (args.items.len == 1) {
-                            return result;
-                        } else if (args.items.len == 2) {
-                            return self.evalCall(result, args.items[0]);
+                        if (endI == 1) {
+                            return self.evalClosure(function, closure, args.items[endI - 1], tailPosition);
+                        }
+                        const result = try self.evalClosure(function, closure, args.items[endI - 1], false);
+                        var resultValue: Value = undefined;
+                        switch (result) {
+                            .ast => |ast| {
+                                resultValue = try self.eval(ast, false);
+                            },
+                            .value => |val| {
+                                resultValue = val;
+                            },
+                        }
+                        if (endI == 2) {
+                            return self.evalCall(resultValue, args.items[0], tailPosition);
                         } else {
-                            var copiedArgs = try args.clone();
-                            defer copiedArgs.deinit();
-                            _ = copiedArgs.pop();
-                            return self.evalCallMult(result, &copiedArgs);
+                            return self.evalCallMult(resultValue, args, endI - 1, tailPosition);
                         }
                     },
                     .recurse => |rec| {
                         if (rec) |recVal| {
-                            return self.evalCallMult(recVal, args);
+                            return self.evalCallMult(recVal, args, endI, tailPosition);
                         } else {
                             return error.UnknownIdentifier;
                         }
                     },
                     .multiArgClosure => |multiClos| {
                         try self.pushValue(function);
+                        const numArgs = endI;
+                        if (tailPosition and self.tco and numArgs == multiClos.argNames.items.len) {
+                            var i: usize = 0;
+                            while (i < numArgs) : (i += 1) {
+                                const argument = args.items[endI - i - 1];
+                                const arg = try self.eval(argument, false);
+                                try self.set(multiClos.argNames.items[multiClos.argNames.items.len - i - 1].lexeme, arg);
+                            }
+                            switch (multiClos.code) {
+                                .ast => |ast| {
+                                    return .{ .ast = ast };
+                                },
+                                .constructor => |constructor| {
+                                    var contents = std.ArrayList(Value).init(self.allocator);
+                                    errdefer contents.deinit();
+                                    for (0..constructor.numArgs) |j| {
+                                        const argName = try std.fmt.allocPrint(
+                                            self.allocator,
+                                            "_{s}{d}",
+                                            .{ constructor.name, j },
+                                        );
+                                        defer self.allocator.free(argName);
+                                        try contents.append(self.lookup(argName).?);
+                                    }
+                                    return .{ .value = .{
+                                        .object = try self.objects.makeConstruct(constructor.name, contents),
+                                    } };
+                                },
+                            }
+                        }
                         var copiedEnv = try multiClos.bound.clone();
-                        const numArgs = args.items.len;
                         var i: usize = 0;
                         // Calculate arguments one by one,
                         // in reverse since stored that way
                         while (i < multiClos.argNames.items.len) : (i += 1) {
-                            if (i < args.items.len) {
+                            if (i < endI) {
                                 errdefer copiedEnv.deinit();
-                                const argument = args.items[args.items.len - i - 1];
-                                const arg = try self.eval(argument);
+                                const argument = args.items[endI - i - 1];
+                                const arg = try self.eval(argument, false);
                                 try self.pushValue(arg);
                                 try copiedEnv.put(multiClos.argNames.items[multiClos.argNames.items.len - i - 1].lexeme, arg);
+                            } else {
+                                break;
                             }
                         }
                         i = 0;
                         while (i < multiClos.argNames.items.len) : (i += 1) {
-                            if (i < args.items.len) {
+                            if (i < endI) {
                                 self.popValue();
                             }
                         }
@@ -664,7 +759,7 @@ pub const Interpreter = struct {
                             var result: Value = undefined;
                             switch (multiClos.code) {
                                 .ast => |ast| {
-                                    result = try self.eval(ast);
+                                    result = try self.eval(ast, true);
                                 },
                                 .constructor => |constructor| {
                                     var contents = std.ArrayList(Value).init(self.allocator);
@@ -684,22 +779,18 @@ pub const Interpreter = struct {
                                 },
                             }
                             if (numArgs > multiClos.argNames.items.len) {
-                                var copiedArgs = try args.clone();
-                                defer copiedArgs.deinit();
-                                i = 0;
-                                while (i < numArgs) : (i += 1) {
-                                    _ = copiedArgs.pop();
-                                }
-                                return self.evalCallMult(result, &copiedArgs);
+                                return self.evalCallMult(result, args, endI - multiClos.argNames.items.len, tailPosition);
                             }
-                            return result;
+                            return .{ .value = result };
                         } else {
+                            try self.pushValue(function);
+                            defer self.popValue();
                             if (multiClos.argNames.items.len - numArgs == 1) {
-                                return .{ .object = try self.objects.makeClosure(
+                                return .{ .value = .{ .object = try self.objects.makeClosure(
                                     multiClos.argNames.items[0],
                                     copiedEnv,
                                     multiClos.code,
-                                ) };
+                                ) } };
                             }
                             var copiedArgs = try multiClos.argNames.clone();
                             errdefer copiedArgs.deinit();
@@ -707,11 +798,11 @@ pub const Interpreter = struct {
                             while (i < numArgs) : (i += 1) {
                                 _ = copiedArgs.pop();
                             }
-                            return .{ .object = try self.objects.makeMultiArgClosure(
+                            return .{ .value = .{ .object = try self.objects.makeMultiArgClosure(
                                 copiedArgs,
                                 copiedEnv,
                                 multiClos.code,
-                            ) };
+                            ) } };
                         }
                     },
                     .construct => {
@@ -721,16 +812,13 @@ pub const Interpreter = struct {
             },
             .builtinFunction => |builtin| {
                 // Arguments are stored in reverse
-                const result = try builtin(self, try self.eval(args.items[args.items.len - 1]));
-                if (args.items.len == 1) {
-                    return result;
-                } else if (args.items.len == 2) {
-                    return self.evalCall(result, args.items[0]);
+                const result = try builtin(self, try self.eval(args.items[endI - 1], false));
+                if (endI == 1) {
+                    return .{ .value = result };
+                } else if (endI == 2) {
+                    return self.evalCall(result, args.items[0], tailPosition);
                 } else {
-                    var copiedArgs = try args.clone();
-                    defer copiedArgs.deinit();
-                    _ = copiedArgs.pop();
-                    return self.evalCallMult(result, &copiedArgs);
+                    return self.evalCallMult(result, args, endI - 1, tailPosition);
                 }
             },
             else => {
@@ -740,175 +828,186 @@ pub const Interpreter = struct {
     }
 
     // Evaluate an expression
-    pub fn eval(self: *Interpreter, ast: *AST) anyerror!Value {
-        switch (ast.*) {
-            .boolConstant => |boolC| {
-                return .{ .bool = boolC.value };
-            },
-            .intConstant => |intC| {
-                return .{ .int = intC.value };
-            },
-            .floatConstant => |floatC| {
-                return .{ .float = floatC.value };
-            },
-            .charConstant => |charC| {
-                return .{ .char = charC.value };
-            },
-            .ifExpr => |ifExpr| {
-                const predicate = try self.eval(ifExpr.predicate);
-                if (predicate.bool) {
-                    return self.eval(ifExpr.thenExpr);
-                } else {
-                    return self.eval(ifExpr.elseExpr);
-                }
-            },
-            .identifier => |id| {
-                const idValue = self.lookup(id.token.lexeme);
-                if (idValue) |val| {
-                    switch (val) {
-                        .object => |obj| {
-                            switch (obj.content) {
-                                .recurse => |rec| {
-                                    if (rec) |recVal| {
-                                        return recVal;
-                                    } else {
-                                        return error.UnknownIdentifier;
-                                    }
+    pub fn eval(self: *Interpreter, ast: *AST, tailPosition: bool) anyerror!Value {
+        var toEval: *AST = ast;
+        var cleanup: std.ArrayList([]const u8) = .init(self.allocator);
+        defer {
+            for (cleanup.items) |toClean| {
+                self.remove(toClean);
+            }
+            cleanup.deinit();
+        }
+        while (true) {
+            switch (toEval.*) {
+                .boolConstant => |boolC| {
+                    return .{ .bool = boolC.value };
+                },
+                .intConstant => |intC| {
+                    return .{ .int = intC.value };
+                },
+                .floatConstant => |floatC| {
+                    return .{ .float = floatC.value };
+                },
+                .charConstant => |charC| {
+                    return .{ .char = charC.value };
+                },
+                .ifExpr => |ifExpr| {
+                    const predicate = try self.eval(ifExpr.predicate, false);
+                    if (predicate.bool) {
+                        toEval = ifExpr.thenExpr;
+                    } else {
+                        toEval = ifExpr.elseExpr;
+                    }
+                },
+                .identifier => |id| {
+                    const idValue = self.lookup(id.token.lexeme);
+                    if (idValue) |val| {
+                        switch (val) {
+                            .object => |obj| {
+                                switch (obj.content) {
+                                    .recurse => |rec| {
+                                        if (rec) |recVal| {
+                                            return recVal;
+                                        } else {
+                                            return error.UnknownIdentifier;
+                                        }
+                                    },
+                                    else => {},
+                                }
+                            },
+                            else => {},
+                        }
+                    }
+                    if (idValue == null) {
+                        std.debug.print("{s}", .{id.token.lexeme});
+                    }
+                    return idValue orelse error.UnknownIdentifier;
+                },
+                .let => |let| {
+                    // To enable recursion, a special object is put,
+                    // which contains an optional value that is then later changed
+                    // to the actual result
+                    const recursionPointer = try self.objects.makeRecurse();
+                    try self.set(let.name.lexeme, .{ .object = recursionPointer });
+                    const valOfVar = try self.eval(let.be, false);
+                    recursionPointer.content.recurse = valOfVar;
+                    try self.set(let.name.lexeme, valOfVar);
+                    try cleanup.append(let.name.lexeme);
+                    toEval = let.in;
+                },
+                .call => |call| {
+                    const function = try self.eval(call.function, false);
+                    switch (try self.evalCall(function, call.arg, tailPosition)) {
+                        .ast => |restAst| {
+                            toEval = restAst;
+                        },
+                        .value => |val| {
+                            return val;
+                        },
+                    }
+                },
+                .callMult => |*callMult| {
+                    const function = try self.eval(callMult.function, false);
+                    switch (try self.evalCallMult(function, &callMult.args, callMult.args.items.len, tailPosition)) {
+                        .ast => |restAst| {
+                            toEval = restAst;
+                        },
+                        .value => |val| {
+                            return val;
+                        },
+                    }
+                },
+                .lambda => |lambda| {
+                    // the boundEnv contains all captured values
+                    var boundEnv = std.StringHashMap(Value).init(self.allocator);
+                    errdefer boundEnv.deinit();
+                    const enclosed = lambda.encloses.?.items;
+                    var i: usize = 0;
+                    while (i < enclosed.len) : (i += 1) {
+                        try boundEnv.put(enclosed[i], self.lookup(enclosed[i]).?);
+                    }
+                    const closure = try self.objects.makeClosure(lambda.argname, boundEnv, .{ .ast = lambda.expr });
+                    return .{ .object = closure };
+                },
+                .lambdaMult => |lambdaMult| {
+                    // the boundEnv contains all captured values
+                    var boundEnv = std.StringHashMap(Value).init(self.allocator);
+                    errdefer boundEnv.deinit();
+                    const enclosed = lambdaMult.encloses.items;
+                    var i: usize = 0;
+                    while (i < enclosed.len) : (i += 1) {
+                        try boundEnv.put(enclosed[i], self.lookup(enclosed[i]).?);
+                    }
+                    const closure = try self.objects.makeMultiArgClosure(
+                        try lambdaMult.argnames.clone(),
+                        boundEnv,
+                        .{ .ast = lambdaMult.expr },
+                    );
+                    return .{ .object = closure };
+                },
+                .operator => |op| {
+                    const left = try self.eval(op.left, false);
+                    try self.pushValue(left);
+                    const right = try self.eval(op.right, false);
+                    self.popValue();
+                    switch (op.token.lexeme[0]) {
+                        '+', '-', '*', '/' => {
+                            return evalNumberOp(op.token, left, right);
+                        },
+                        '<', '>', '=', '!' => {
+                            return evalComp(op.token, left, right);
+                        },
+                        ';' => {
+                            return right;
+                        },
+                        else => {
+                            return undefined;
+                        },
+                    }
+                },
+                .prefixOp => |prefixOp| {
+                    switch (prefixOp.token.lexeme[0]) {
+                        '!' => {
+                            const exprResult = try self.eval(prefixOp.expr, false);
+                            return .{ .bool = !exprResult.bool };
+                        },
+                        '-' => {
+                            const exprResult = try self.eval(prefixOp.expr, false);
+                            switch (exprResult) {
+                                .int => |int| {
+                                    return .{ .int = -int };
                                 },
-                                else => {},
+                                .float => |f| {
+                                    return .{ .float = -f };
+                                },
+                                else => {
+                                    return error.UnexpectedType;
+                                },
                             }
                         },
-                        else => {},
+                        else => {
+                            return error.UnexpectedType;
+                        },
                     }
-                }
-                return idValue orelse error.UnknownIdentifier;
-            },
-            .let => |let| {
-                const prev = self.currentEnv.contents.get(let.name.lexeme);
-                if (prev) |prevV| {
-                    try self.pushValue(prevV);
-                }
-                // To enable recursion, a special object is put,
-                // which contains an optional value that is then later changed
-                // to the actual result
-                const recursionPointer = try self.objects.makeRecurse();
-                try self.set(let.name.lexeme, .{ .object = recursionPointer });
-                const valOfVar = try self.eval(let.be);
-                recursionPointer.content.recurse = valOfVar;
-                try self.set(let.name.lexeme, valOfVar);
-                const result = try self.eval(let.in);
-                if (prev) |prevValue| {
-                    self.popValue();
-                    try self.set(let.name.lexeme, prevValue);
-                } else {
-                    _ = self.remove(let.name.lexeme);
-                }
-                return result;
-            },
-            .call => |call| {
-                const function = try self.eval(call.function);
-                return self.evalCall(function, call.arg);
-            },
-            .callMult => |*callMult| {
-                const function = try self.eval(callMult.function);
-                return self.evalCallMult(function, &callMult.args);
-            },
-            .lambda => |lambda| {
-                // the boundEnv contains all captured values
-                var boundEnv = std.StringHashMap(Value).init(self.allocator);
-                errdefer boundEnv.deinit();
-                const enclosed = lambda.encloses.?.items;
-                var i: usize = 0;
-                while (i < enclosed.len) : (i += 1) {
-                    try boundEnv.put(enclosed[i], self.lookup(enclosed[i]).?);
-                }
-                const closure = try self.objects.makeClosure(lambda.argname, boundEnv, .{ .ast = lambda.expr });
-                return .{ .object = closure };
-            },
-            .lambdaMult => |lambdaMult| {
-                // the boundEnv contains all captured values
-                var boundEnv = std.StringHashMap(Value).init(self.allocator);
-                errdefer boundEnv.deinit();
-                const enclosed = lambdaMult.encloses.items;
-                var i: usize = 0;
-                while (i < enclosed.len) : (i += 1) {
-                    try boundEnv.put(enclosed[i], self.lookup(enclosed[i]).?);
-                }
-                const closure = try self.objects.makeMultiArgClosure(
-                    try lambdaMult.argnames.clone(),
-                    boundEnv,
-                    .{ .ast = lambdaMult.expr },
-                );
-                return .{ .object = closure };
-            },
-            .operator => |op| {
-                const left = try self.eval(op.left);
-                try self.pushValue(left);
-                const right = try self.eval(op.right);
-                self.popValue();
-                switch (op.token.lexeme[0]) {
-                    '+', '-', '*', '/' => {
-                        return evalNumberOp(op.token, left, right);
-                    },
-                    '<', '>', '=', '!' => {
-                        return evalComp(op.token, left, right);
-                    },
-                    ';' => {
-                        return right;
-                    },
-                    else => {
-                        return undefined;
-                    },
-                }
-            },
-            .prefixOp => |prefixOp| {
-                switch (prefixOp.token.lexeme[0]) {
-                    '!' => {
-                        const exprResult = try self.eval(prefixOp.expr);
-                        return .{ .bool = !exprResult.bool };
-                    },
-                    '-' => {
-                        const exprResult = try self.eval(prefixOp.expr);
-                        switch (exprResult) {
-                            .int => |int| {
-                                return .{ .int = -int };
-                            },
-                            .float => |f| {
-                                return .{ .float = -f };
-                            },
-                            else => {
-                                return error.UnexpectedType;
-                            },
+                },
+                .case => |case| {
+                    const caseValue = try self.eval(case.value, false);
+                    const construct = caseValue.object.content.construct;
+                    for (case.patterns.items, case.bodies.items) |pattern, body| {
+                        if (std.mem.eql(u8, pattern.name.lexeme, construct.name)) {
+                            for (construct.values.items, pattern.values.items) |val, name| {
+                                try self.set(name.lexeme, val);
+                                try cleanup.append(name.lexeme);
+                            }
+                            toEval = body;
+                            break;
                         }
-                    },
-                    else => {
-                        return error.UnexpectedType;
-                    },
-                }
-            },
-            .case => |case| {
-                const caseValue = try self.eval(case.value);
-                try self.pushValue(caseValue);
-                defer self.popValue();
-                const construct = caseValue.object.content.construct;
-                for (case.patterns.items, case.bodies.items) |pattern, body| {
-                    if (std.mem.eql(u8, pattern.name.lexeme, construct.name)) {
-                        for (construct.values.items, pattern.values.items) |val, name| {
-                            try self.set(name.lexeme, val);
-                            try self.pushValue(val);
-                        }
-                        const result = self.eval(body);
-                        for (0..construct.values.items.len) |_| {
-                            self.popValue();
-                        }
-                        return result;
                     }
-                }
-                return error.UnexpectedType;
-            },
-            .list => {
-                return error.UnexpectedType;
-            },
+                },
+                .list => {
+                    return error.UnexpectedType;
+                },
+            }
         }
     }
 
@@ -917,7 +1016,7 @@ pub const Interpreter = struct {
             .let => |let| {
                 const recursionPointer = try self.objects.makeRecurse();
                 try self.set(let.name.lexeme, .{ .object = recursionPointer });
-                const val = try self.eval(let.be);
+                const val = try self.eval(let.be, false);
                 recursionPointer.content.recurse = val;
                 try self.set(let.name.lexeme, val);
             },
@@ -962,6 +1061,6 @@ pub const Interpreter = struct {
             .lexeme = "Void",
             .type = .Identifier,
         } } };
-        _ = try self.evalCall(self.lookup("main").?, voidAst);
+        _ = try self.evalCall(self.lookup("main").?, voidAst, false);
     }
 };

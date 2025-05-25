@@ -288,6 +288,10 @@ pub const OptimizeFullyInstantiatedCalls = struct {
                     .call => {
                         try combineCalls(ast, allocator);
                         try run(ast.callMult.function, allocator);
+
+                        for (ast.callMult.args.items) |arg| {
+                            try run(arg, allocator);
+                        }
                     },
                     else => {
                         try run(call.function, allocator);

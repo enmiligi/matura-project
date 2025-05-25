@@ -9,7 +9,7 @@
             "request": "launch",
             "name": "Debug",
             "program": "${workspaceFolder}/zig-out/bin/matura-project",
-            "args": ["examples/primes.lang"],
+            "args": ["examples/fibonacci.lang"],
             "cwd": "${workspaceFolder}"
         }
     ]

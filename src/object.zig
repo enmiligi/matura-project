@@ -38,8 +38,8 @@ pub const ObjectContent = union(enum) {
     construct: Construct,
 };
 
-const GCStressTest: bool = true;
-const GCLog: bool = true;
+const GCStressTest: bool = false;
+const GCLog: bool = false;
 
 pub const Object = struct {
     content: ObjectContent,
