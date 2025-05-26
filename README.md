@@ -1,3 +1,3 @@
 # Imp
 
-Imp is a ML-like language made for my maturity project.
+Imp is a ML-like language made for my matura project.
