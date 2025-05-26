@@ -823,10 +823,18 @@ pub const Interpreter = struct {
                         const numArgs = endI;
                         if (tailPosition and self.tco and numArgs == multiClos.argNames.items.len) {
                             var i: usize = 0;
+                            var arguments: std.ArrayList(Value) = .init(self.allocator);
+                            try arguments.resize(numArgs);
+                            defer arguments.deinit();
                             while (i < numArgs) : (i += 1) {
                                 const argument = args.items[endI - i - 1];
                                 const arg = try self.eval(argument, false);
-                                try self.set(multiClos.argNames.items[multiClos.argNames.items.len - i - 1].lexeme, arg);
+                                try self.pushValue(arg);
+                                arguments.items[i] = arg;
+                            }
+                            for (arguments.items, 0..) |arg, j| {
+                                try self.set(multiClos.argNames.items[multiClos.argNames.items.len - j - 1].lexeme, arg);
+                                self.popValue();
                             }
                             switch (multiClos.code) {
                                 .ast => |ast| {
