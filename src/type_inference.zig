@@ -1201,15 +1201,6 @@ pub const AlgorithmJ = struct {
             },
             .let => |let| {
                 self.allocator.destroy(t);
-                if (self.globalTypes.contains(let.name.lexeme)) {
-                    try self.errors.errorAt(
-                        let.name.start,
-                        let.name.end,
-                        "This name is used for a global variable.",
-                        .{},
-                    );
-                    return error.CouldNotUnify;
-                }
                 if (typeEnv.contains(let.name.lexeme)) {
                     try self.errors.errorAt(
                         let.name.start,
@@ -1369,15 +1360,6 @@ pub const AlgorithmJ = struct {
                                 );
                             },
                             .function => |func| {
-                                if (self.globalTypes.contains(value.lexeme)) {
-                                    try self.errors.errorAt(
-                                        value.start,
-                                        value.end,
-                                        "This name is used for a global variable.",
-                                        .{},
-                                    );
-                                    return error.CouldNotUnify;
-                                }
                                 if (typeEnv.contains(value.lexeme)) {
                                     try self.errors.errorAt(
                                         value.start,
