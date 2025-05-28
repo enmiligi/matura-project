@@ -57,7 +57,7 @@ pub const Parser = struct {
     fn initBuiltin(self: *Parser, name: []const u8, tExpr: []const u8) !void {
         try self.newSource(tExpr);
         var region: utils.Region = .{ .start = 0, .end = 0 };
-        const t = try self.typeExpr(&region, false, true);
+        const t = try self.constrainedType(&region, false, 0);
         const tS = self.algorithmJ.generalise(t, 0) catch |err| {
             t.deinit(self.allocator);
             return err;
@@ -141,7 +141,7 @@ pub const Parser = struct {
         return null;
     }
 
-    pub fn typeExpr(self: *Parser, region: *utils.Region, declaredVars: bool, callPrecedence: bool) !*type_inference.Type {
+    pub fn constrainedType(self: *Parser, region: *utils.Region, declaredVars: bool, precedence: u8) !*type_inference.Type {
         var start: usize = 0;
         while (try self.constraint()) |constraintStart| {
             if (start == 0) {
@@ -152,9 +152,16 @@ pub const Parser = struct {
             }
         }
         if (start != 0) {
-            region.start = start;
             _ = try self.expectToken(.DoubleArrow);
         }
+        const result = try self.typeExpr(region, declaredVars, precedence);
+        if (start != 0) {
+            region.start = start;
+        }
+        return result;
+    }
+
+    pub fn typeExpr(self: *Parser, region: *utils.Region, declaredVars: bool, precedence: u8) !*type_inference.Type {
         var currentType: *type_inference.Type = undefined;
         if (self.typeVar()) |typeVarName| {
             if (region.start == 0) {
@@ -198,7 +205,7 @@ pub const Parser = struct {
             } else if (std.mem.eql(u8, tN.lexeme, "Char")) {
                 currentType.data = .{ .primitive = .Char };
             } else if (self.algorithmJ.composite.get(tN.lexeme)) |compositeType| {
-                if (compositeType.numVars > 0 and !callPrecedence) {
+                if (compositeType.numVars > 0 and precedence >= 1) {
                     try self.errs.errorAt(
                         tN.start,
                         tN.end,
@@ -217,7 +224,7 @@ pub const Parser = struct {
                 var i: usize = 0;
                 while (i < compositeType.numVars) : (i += 1) {
                     var _region: utils.Region = .{ .start = 0, .end = 0 };
-                    const arg = try self.typeExpr(&_region, declaredVars, false);
+                    const arg = try self.typeExpr(&_region, declaredVars, 1);
                     try args.append(arg);
                     region.end = _region.end;
                 }
@@ -237,7 +244,7 @@ pub const Parser = struct {
                 region.start = t.start;
             }
             var r: utils.Region = .{ .start = 0, .end = 0 };
-            currentType = try self.typeExpr(&r, declaredVars, true);
+            currentType = try self.typeExpr(&r, declaredVars, 0);
             errdefer currentType.deinit(self.allocator);
             region.end = (try self.expectToken(.RightParen)).end;
         } else {
@@ -249,11 +256,11 @@ pub const Parser = struct {
             );
             return error.UnexpectedToken;
         }
-        if (callPrecedence and self.peekToken().type == .Arrow) {
+        if (precedence == 0 and self.peekToken().type == .Arrow) {
             _ = try self.getToken();
             errdefer currentType.deinit(self.allocator);
             var innerRegion: utils.Region = .{ .start = 0, .end = 0 };
-            const returnType = try self.typeExpr(&innerRegion, declaredVars, true);
+            const returnType = try self.typeExpr(&innerRegion, declaredVars, 0);
             region.end = innerRegion.end;
             errdefer returnType.deinit(self.allocator);
             const argumentType = currentType;
@@ -263,7 +270,7 @@ pub const Parser = struct {
                 .to = returnType,
             } };
         }
-        if (callPrecedence and (self.peekToken().type == .LeftParen or self.peekToken().type == .Identifier)) {
+        if (precedence == 0 and (self.peekToken().type == .LeftParen or self.peekToken().type == .Identifier)) {
             currentType.deinit(self.allocator);
             try self.errs.errorAt(
                 self.peekToken().start,
@@ -373,7 +380,7 @@ pub const Parser = struct {
                 self.typeVarMap.?.deinit();
                 self.typeVarMap = null;
             }
-            const t = try self.typeExpr(&typeRegion, false, true);
+            const t = try self.constrainedType(&typeRegion, false, 0);
             typeAnnotation = .{ .type = t, .region = typeRegion };
         }
 
@@ -401,7 +408,7 @@ pub const Parser = struct {
             }
             var region: utils.Region = .{ .start = 0, .end = 0 };
             while (self.peekToken().type == .Identifier or self.peekToken().type == .LeftParen) {
-                try args.append(try self.typeExpr(&region, true, false));
+                try args.append(try self.typeExpr(&region, true, 1));
             }
             return .{ .name = constructorName, .args = args };
         }
@@ -420,6 +427,9 @@ pub const Parser = struct {
             return error.UnexpectedToken;
         } else if (self.algorithmJ.composite.contains(name.lexeme)) {
             try self.errs.errorAt(name.start, name.end, "The Type {s} has already been declared.", .{name.lexeme});
+            return error.UnexpectedToken;
+        } else if (std.mem.eql(u8, name.lexeme, "Number")) {
+            try self.errs.errorAt(name.start, name.end, "A Type can't be named 'Number'.", .{});
             return error.UnexpectedToken;
         }
 
@@ -696,7 +706,7 @@ pub const Parser = struct {
                 self.typeVarMap.?.deinit();
                 self.typeVarMap = null;
             }
-            const t = try self.typeExpr(&typeRegion, false, true);
+            const t = try self.constrainedType(&typeRegion, false, 0);
             typeAnnotation = .{ .type = t, .region = typeRegion };
         }
 
@@ -746,7 +756,7 @@ pub const Parser = struct {
                 self.typeVarMap.?.deinit();
                 self.typeVarMap = null;
             }
-            const t = try self.typeExpr(&typeRegion, false, true);
+            const t = try self.constrainedType(&typeRegion, false, 0);
             argType = .{ .type = t, .region = typeRegion };
         }
 
