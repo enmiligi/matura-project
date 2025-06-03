@@ -237,7 +237,7 @@ pub fn main() !u8 {
     };
 
     interpreter_.runMain() catch |err| switch (err) {
-        error.Overflow => {
+        error.Overflow, error.UnknownIdentifier => {
             try errbw.flush();
             return 1;
         },

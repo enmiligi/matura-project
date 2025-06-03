@@ -1,0 +1,3 @@
+let flip: (a -> b -> c) -> (b -> a -> c) =
+    lambda f. lambda y. lambda x.
+        f x y

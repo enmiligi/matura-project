@@ -174,8 +174,8 @@ pub const OptimizeClosures = struct {
                 defer exclude.deinit();
                 try exclude.put(lambda.argname.lexeme, undefined);
                 try findEnclosed(ast, &found, &exclude);
-                try run(lambda.expr, allocator);
                 lambda.encloses = found;
+                try run(lambda.expr, allocator);
             },
             .prefixOp => |prefixOp| {
                 try run(prefixOp.expr, allocator);

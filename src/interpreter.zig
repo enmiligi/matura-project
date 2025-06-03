@@ -132,6 +132,7 @@ pub const Interpreter = struct {
     fn trace(self: *Interpreter, arg: Value) !Value {
         try self.traceEnv(self.currentEnv, false);
         try self.stdout.print("\n", .{});
+        try self.stdoutbw.flush();
         return arg;
     }
 
@@ -295,6 +296,8 @@ pub const Interpreter = struct {
         while (!env.contents.contains(name)) {
             if (env.next) |nextEnv| {
                 env = nextEnv;
+            } else {
+                break;
             }
         }
         return env.contents.get(name);
@@ -606,6 +609,10 @@ pub const Interpreter = struct {
         self.popValue();
         if (tailPosition and self.tco) {
             try self.set(clos.argName.lexeme, argument);
+            var boundIterator = clos.bound.iterator();
+            while (boundIterator.next()) |bound| {
+                try self.set(bound.key_ptr.*, bound.value_ptr.*);
+            }
             switch (clos.code) {
                 .ast => |ast| {
                     self.currentEnv.file = clos.fileName;
@@ -684,6 +691,10 @@ pub const Interpreter = struct {
                         self.popValue();
                         if (tailPosition and self.tco and multiClos.argNames.items.len == 1) {
                             try self.set(multiClos.argNames.items[0].lexeme, argument);
+                            var boundIterator = multiClos.bound.iterator();
+                            while (boundIterator.next()) |bound| {
+                                try self.set(bound.key_ptr.*, bound.value_ptr.*);
+                            }
                             switch (multiClos.code) {
                                 .ast => |ast| {
                                     self.currentEnv.file = multiClos.fileName;
@@ -835,6 +846,10 @@ pub const Interpreter = struct {
                             for (arguments.items, 0..) |arg, j| {
                                 try self.set(multiClos.argNames.items[multiClos.argNames.items.len - j - 1].lexeme, arg);
                                 self.popValue();
+                            }
+                            var boundIterator = multiClos.bound.iterator();
+                            while (boundIterator.next()) |bound| {
+                                try self.set(bound.key_ptr.*, bound.value_ptr.*);
                             }
                             switch (multiClos.code) {
                                 .ast => |ast| {
@@ -1015,7 +1030,7 @@ pub const Interpreter = struct {
                         }
                     }
                     if (idValue == null) {
-                        std.debug.print("{s}", .{id.token.lexeme});
+                        try self.runtimeError("Identifier not found");
                     }
                     return idValue orelse error.UnknownIdentifier;
                 },

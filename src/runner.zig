@@ -89,7 +89,7 @@ pub const Runner = struct {
         interpreter_.newFile(fileName);
         for (statements.items) |statement| {
             interpreter_.runStatement(statement) catch |err| switch (err) {
-                error.Overflow => {
+                error.Overflow, error.UnknownIdentifier => {
                     try errbw.flush();
                     return 1;
                 },

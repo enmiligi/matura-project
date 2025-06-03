@@ -33,3 +33,21 @@ let set: List a -> Int -> a -> List a =
                 xs
             else
                 Cons x (set rest (i - 1) value)
+
+let foldl: (b -> a -> b) -> b -> List a -> b =
+    lambda conj. lambda acc. lambda xs.
+        case xs of
+            Nil => acc
+            | Cons x rest =>
+                foldl conj (conj acc x) rest
+
+let reverse: List a -> List a =
+    foldl (lambda list. lambda x. Cons x list) Nil
+
+let foldr: (a -> b -> b) -> b -> List a -> b =
+    lambda conj. lambda acc. lambda xs.
+        foldl (lambda x. lambda y. conj y x) acc (reverse xs)
+
+let map: (a -> b) -> List a -> List b =
+    lambda f. lambda xs.
+        reverse (foldl (lambda acc. lambda x. Cons (f x) acc) Nil xs)

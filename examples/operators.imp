@@ -1,3 +1,4 @@
 let double = lambda x. x + x
 let six = double 3
-let main = double 2.7
+let main = lambda x.
+    print (double 2.7)
