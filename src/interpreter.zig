@@ -304,20 +304,6 @@ pub const Interpreter = struct {
     }
 
     inline fn set(self: *Interpreter, name: []const u8, val: Value) !void {
-        switch (val) {
-            .object => |obj| {
-                switch (obj.content) {
-                    .closure => |*closure| {
-                        closure.name = name;
-                    },
-                    .multiArgClosure => |*multiClosure| {
-                        multiClosure.name = name;
-                    },
-                    else => {},
-                }
-            },
-            else => {},
-        }
         try self.currentEnv.contents.put(name, val);
     }
 
@@ -766,6 +752,7 @@ pub const Interpreter = struct {
                                     copiedEnv,
                                     code,
                                 );
+                                closObj.content.closure.name = multiClos.name;
                                 self.popValue();
                                 return .{ .value = .{
                                     .object = closObj,
@@ -775,6 +762,7 @@ pub const Interpreter = struct {
                             _ = copiedArgs.pop();
                             try self.pushValue(argument);
                             const multiArgClos = try self.objects.makeMultiArgClosure(copiedArgs, copiedEnv, multiClos.code);
+                            multiArgClos.content.multiArgClosure.name = multiClos.name;
                             self.popValue();
                             return .{ .value = .{
                                 .object = multiArgClos,
@@ -937,11 +925,13 @@ pub const Interpreter = struct {
                             try self.pushValue(function);
                             defer self.popValue();
                             if (multiClos.argNames.items.len - numArgs == 1) {
-                                return .{ .value = .{ .object = try self.objects.makeClosure(
+                                const closure = try self.objects.makeClosure(
                                     multiClos.argNames.items[0],
                                     copiedEnv,
                                     multiClos.code,
-                                ) } };
+                                );
+                                closure.content.closure.name = multiClos.name;
+                                return .{ .value = .{ .object = closure } };
                             }
                             var copiedArgs = try multiClos.argNames.clone();
                             errdefer copiedArgs.deinit();
@@ -949,11 +939,13 @@ pub const Interpreter = struct {
                             while (i < numArgs) : (i += 1) {
                                 _ = copiedArgs.pop();
                             }
-                            return .{ .value = .{ .object = try self.objects.makeMultiArgClosure(
+                            const multiArgClosure = try self.objects.makeMultiArgClosure(
                                 copiedArgs,
                                 copiedEnv,
                                 multiClos.code,
-                            ) } };
+                            );
+                            multiArgClosure.content.multiArgClosure.name = multiClos.name;
+                            return .{ .value = .{ .object = multiArgClosure } };
                         }
                     },
                     .construct => {
@@ -1041,8 +1033,23 @@ pub const Interpreter = struct {
                     const recursionPointer = try self.objects.makeRecurse();
                     try self.set(let.name.lexeme, .{ .object = recursionPointer });
                     const valOfVar = try self.eval(let.be, false);
+                    const isLambda = switch (let.be.*) {
+                        .lambda, .lambdaMult => true,
+                        else => false,
+                    };
                     recursionPointer.content.recurse = valOfVar;
                     try self.set(let.name.lexeme, valOfVar);
+                    if (isLambda) {
+                        switch (valOfVar.object.content) {
+                            .closure => |*clos| {
+                                clos.name = let.name.lexeme;
+                            },
+                            .multiArgClosure => |*multiClos| {
+                                multiClos.name = let.name.lexeme;
+                            },
+                            else => {},
+                        }
+                    }
                     try cleanup.append(let.name.lexeme);
                     toEval = let.in;
                 },
@@ -1170,7 +1177,22 @@ pub const Interpreter = struct {
             .let => |let| {
                 const recursionPointer = try self.objects.makeRecurse();
                 try self.set(let.name.lexeme, .{ .object = recursionPointer });
+                const isLambda = switch (let.be.*) {
+                    .lambda, .lambdaMult => true,
+                    else => false,
+                };
                 const val = try self.eval(let.be, false);
+                if (isLambda) {
+                    switch (val.object.content) {
+                        .closure => |*clos| {
+                            clos.name = let.name.lexeme;
+                        },
+                        .multiArgClosure => |*multiClos| {
+                            multiClos.name = let.name.lexeme;
+                        },
+                        else => {},
+                    }
+                }
                 recursionPointer.content.recurse = val;
                 try self.set(let.name.lexeme, val);
             },
@@ -1200,6 +1222,7 @@ pub const Interpreter = struct {
                         .numArgs = constructor.args.items.len,
                         .name = constructor.name.lexeme,
                     } });
+                    multiArgClosure.content.multiArgClosure.name = constructor.name.lexeme;
                     try self.set(constructor.name.lexeme, .{ .object = multiArgClosure });
                 }
             },
