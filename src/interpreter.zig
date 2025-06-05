@@ -96,9 +96,8 @@ pub const Interpreter = struct {
 
     fn print(self: *Interpreter, arg: Value) !Value {
         try value.printValue(arg, self.stdout);
-        const values = std.ArrayList(Value).init(self.allocator);
-        const composite = try self.objects.makeConstruct("Void", values);
-        return .{ .object = composite };
+        const composite = try self.objects.makeConstruct("Void", null);
+        return composite;
     }
 
     fn printEnvTrace(self: *Interpreter, env: *Env, isError: bool) !void {
@@ -152,67 +151,66 @@ pub const Interpreter = struct {
             std.math.maxInt(usize),
         ) orelse "";
         defer self.allocator.free(line);
-        var listVal = try self.objects.makeConstruct("Nil", .init(self.allocator));
+        var listVal = try self.objects.makeConstruct("Nil", null);
         for (1..line.len + 1) |i| {
-            var vals = std.ArrayList(Value).init(self.allocator);
-            errdefer vals.deinit();
-            try vals.append(.{ .char = line[line.len - i] });
-            try vals.append(.{ .object = listVal });
-            try self.pushValue(.{ .object = listVal });
+            var vals = try self.allocator.alloc(Value, 2);
+            errdefer self.allocator.free(vals);
+            vals[0] = .{ .char = line[line.len - i] };
+            vals[1] = listVal;
+            try self.pushValue(listVal);
             listVal = try self.objects.makeConstruct("Cons", vals);
             self.popValue();
         }
-        return .{ .object = listVal };
+        return listVal;
     }
 
     fn listToString(self: *Interpreter, list: Value) !std.ArrayList(u8) {
         var values = std.ArrayList(u8).init(self.allocator);
         errdefer values.deinit();
         var rest = list;
-        while (std.mem.eql(u8, rest.object.content.construct.name, "Cons")) {
-            try values.append(rest.object.content.construct.values.items[0].char);
-            rest = rest.object.content.construct.values.items[1];
+        while (std.mem.eql(u8, rest.construct.name, "Cons")) {
+            try values.append(rest.construct.values.?[0].char);
+            rest = rest.construct.values.?[1];
         }
         return values;
     }
 
     fn stringToList(self: *Interpreter, chars: []const u8) !Value {
-        var list = try self.objects.makeConstruct("Nil", .init(self.allocator));
+        var list = try self.objects.makeConstruct("Nil", null);
         for (1..chars.len + 1) |i| {
-            var values = std.ArrayList(Value).init(self.allocator);
-            try values.append(.{ .char = chars[chars.len - i] });
-            try values.append(.{ .object = list });
-            try self.pushValue(.{ .object = list });
+            const values = try self.allocator.alloc(Value, 2);
+            errdefer self.allocator.free(values);
+            values[0] = .{ .char = chars[chars.len - i] };
+            values[1] = list;
+            try self.pushValue(list);
             list = try self.objects.makeConstruct("Cons", values);
             self.popValue();
         }
-        return .{ .object = list };
+        return list;
     }
 
     fn parseInt(self: *Interpreter, arg: Value) !Value {
         const string = try self.listToString(arg);
         defer string.deinit();
         const number: i64 = std.fmt.parseInt(i64, string.items, 10) catch {
-            return .{
-                .object = try self.objects.makeConstruct("None", .init(self.allocator)),
-            };
+            return try self.objects.makeConstruct("None", null);
         };
-        var contents: std.ArrayList(Value) = .init(self.allocator);
-        try contents.append(.{ .int = number });
-        return .{ .object = try self.objects.makeConstruct("Some", contents) };
+        var contents = try self.allocator.alloc(Value, 1);
+        errdefer self.allocator.free(contents);
+        contents[0] = .{ .int = number };
+        return try self.objects.makeConstruct("Some", contents);
     }
 
     fn parseFloat(self: *Interpreter, arg: Value) !Value {
         const string = try self.listToString(arg);
         defer string.deinit();
         const number: f64 = std.fmt.parseFloat(f64, string.items) catch {
-            return .{
-                .object = try self.objects.makeConstruct("None", .init(self.allocator)),
-            };
+            return try self.objects.makeConstruct("None", null);
         };
-        var contents: std.ArrayList(Value) = .init(self.allocator);
-        try contents.append(.{ .float = number });
-        return .{ .object = try self.objects.makeConstruct("Some", contents) };
+        var contents = try self.allocator.alloc(Value, 1);
+        errdefer self.allocator.free(contents);
+        contents[0] = .{ .float = number };
+        return try self.objects.makeConstruct("Some", contents);
     }
 
     fn showInt(self: *Interpreter, arg: Value) !Value {
@@ -520,49 +518,40 @@ pub const Interpreter = struct {
                             else => {},
                         }
                     },
-                    .construct => |construct1| {
-                        switch (right) {
-                            .object => |object2| {
-                                switch (object2.content) {
-                                    .recurse => |rec2| {
-                                        if (rec2) |rec2Value| {
-                                            return evalComp(op, left, rec2Value);
-                                        } else {
-                                            return error.UnknownIdentifier;
-                                        }
-                                    },
-                                    .construct => |construct2| {
-                                        switch (op.lexeme[0]) {
-                                            '=' => {
-                                                if (!std.mem.eql(u8, construct1.name, construct2.name)) {
-                                                    return .{ .bool = false };
-                                                }
-                                                var equal = true;
-                                                for (construct1.values.items, construct2.values.items) |value1, value2| {
-                                                    equal = equal and (try evalComp(op, value1, value2)).bool;
-                                                }
-                                                return .{ .bool = equal };
-                                            },
-                                            '!' => {
-                                                if (!std.mem.eql(u8, construct1.name, construct2.name)) {
-                                                    return .{ .bool = true };
-                                                }
-                                                var different = false;
-                                                for (construct1.values.items, construct2.values.items) |value1, value2| {
-                                                    different = different or (try evalComp(op, value1, value2)).bool;
-                                                }
-                                                return .{ .bool = different };
-                                            },
-                                            else => {},
-                                        }
-                                    },
-                                    else => {},
-                                }
-                            },
-                            else => {},
-                        }
-                    },
                 }
+            },
+            .construct => |construct1| {
+                const construct2 = right.construct;
+                switch (op.lexeme[0]) {
+                    '=' => {
+                        if (!std.mem.eql(u8, construct1.name, construct2.name)) {
+                            return .{ .bool = false };
+                        }
+                        if (construct1.values == null) {
+                            return .{ .bool = true };
+                        }
+                        var equal = true;
+                        for (construct1.values.?, construct2.values.?) |value1, value2| {
+                            equal = equal and (try evalComp(op, value1, value2)).bool;
+                        }
+                        return .{ .bool = equal };
+                    },
+                    '!' => {
+                        if (!std.mem.eql(u8, construct1.name, construct2.name)) {
+                            return .{ .bool = true };
+                        }
+                        if (construct1.values == null) {
+                            return .{ .bool = false };
+                        }
+                        var different = false;
+                        for (construct1.values.?, construct2.values.?) |value1, value2| {
+                            different = different or (try evalComp(op, value1, value2)).bool;
+                        }
+                        return .{ .bool = different };
+                    },
+                    else => {},
+                }
+                return undefined;
             },
             .builtinFunction => |builtin1| {
                 switch (right) {
@@ -607,20 +596,9 @@ pub const Interpreter = struct {
                     return .{ .ast = ast };
                 },
                 .constructor => |constructor| {
-                    var contents = std.ArrayList(Value).init(self.allocator);
-                    errdefer contents.deinit();
-                    for (0..constructor.numArgs) |i| {
-                        const argName = try std.fmt.allocPrint(
-                            self.allocator,
-                            "_{s}{d}",
-                            .{ constructor.name, i },
-                        );
-                        defer self.allocator.free(argName);
-                        try contents.append(self.lookup(argName).?);
-                    }
-                    return .{ .value = .{
-                        .object = try self.objects.makeConstruct(constructor.name, contents),
-                    } };
+                    return .{
+                        .value = try self.evalConstructor(constructor),
+                    };
                 },
             }
         }
@@ -638,22 +616,29 @@ pub const Interpreter = struct {
                 return .{ .value = try self.eval(ast, true) };
             },
             .constructor => |constructor| {
-                var contents = std.ArrayList(Value).init(self.allocator);
-                errdefer contents.deinit();
-                for (0..constructor.numArgs) |i| {
-                    const argName = try std.fmt.allocPrint(
-                        self.allocator,
-                        "_{s}{d}",
-                        .{ constructor.name, i },
-                    );
-                    defer self.allocator.free(argName);
-                    try contents.append(self.lookup(argName).?);
-                }
-                return .{ .value = .{
-                    .object = try self.objects.makeConstruct(constructor.name, contents),
-                } };
+                return .{
+                    .value = try self.evalConstructor(constructor),
+                };
             },
         }
+    }
+
+    fn evalConstructor(self: *Interpreter, constructor: object.Constructor) !Value {
+        if (constructor.numArgs == 0) {
+            return self.objects.makeConstruct(constructor.name, null);
+        }
+        const contents = try self.allocator.alloc(Value, constructor.numArgs);
+        errdefer self.allocator.free(contents);
+        for (0..constructor.numArgs) |i| {
+            const argName = try std.fmt.allocPrint(
+                self.allocator,
+                "_{s}{d}",
+                .{ constructor.name, i },
+            );
+            defer self.allocator.free(argName);
+            contents[i] = self.lookup(argName).?;
+        }
+        return self.objects.makeConstruct(constructor.name, contents);
     }
 
     // Evaluate a call with a single argument
@@ -689,20 +674,7 @@ pub const Interpreter = struct {
                                     return .{ .ast = ast };
                                 },
                                 .constructor => |constructor| {
-                                    var contents = std.ArrayList(Value).init(self.allocator);
-                                    errdefer contents.deinit();
-                                    for (0..constructor.numArgs) |i| {
-                                        const argName = try std.fmt.allocPrint(
-                                            self.allocator,
-                                            "_{s}{d}",
-                                            .{ constructor.name, i },
-                                        );
-                                        defer self.allocator.free(argName);
-                                        try contents.append(self.lookup(argName).?);
-                                    }
-                                    return .{ .value = .{
-                                        .object = try self.objects.makeConstruct(constructor.name, contents),
-                                    } };
+                                    return .{ .value = try self.evalConstructor(constructor) };
                                 },
                             }
                         }
@@ -726,20 +698,7 @@ pub const Interpreter = struct {
                                     return .{ .value = result };
                                 },
                                 .constructor => |constructor| {
-                                    var contents = std.ArrayList(Value).init(self.allocator);
-                                    errdefer contents.deinit();
-                                    for (0..constructor.numArgs) |i| {
-                                        const argName = try std.fmt.allocPrint(
-                                            self.allocator,
-                                            "_{s}{d}",
-                                            .{ constructor.name, i },
-                                        );
-                                        defer self.allocator.free(argName);
-                                        try contents.append(self.lookup(argName).?);
-                                    }
-                                    return .{ .value = .{
-                                        .object = try self.objects.makeConstruct(constructor.name, contents),
-                                    } };
+                                    return .{ .value = try self.evalConstructor(constructor) };
                                 },
                             }
                         } else {
@@ -768,9 +727,6 @@ pub const Interpreter = struct {
                                 .object = multiArgClos,
                             } };
                         }
-                    },
-                    else => {
-                        return error.UnexpectedType;
                     },
                 }
             },
@@ -847,20 +803,7 @@ pub const Interpreter = struct {
                                     return .{ .ast = ast };
                                 },
                                 .constructor => |constructor| {
-                                    var contents = std.ArrayList(Value).init(self.allocator);
-                                    errdefer contents.deinit();
-                                    for (0..constructor.numArgs) |j| {
-                                        const argName = try std.fmt.allocPrint(
-                                            self.allocator,
-                                            "_{s}{d}",
-                                            .{ constructor.name, j },
-                                        );
-                                        defer self.allocator.free(argName);
-                                        try contents.append(self.lookup(argName).?);
-                                    }
-                                    return .{ .value = .{
-                                        .object = try self.objects.makeConstruct(constructor.name, contents),
-                                    } };
+                                    return .{ .value = try self.evalConstructor(constructor) };
                                 },
                             }
                         }
@@ -901,20 +844,7 @@ pub const Interpreter = struct {
                                     result = try self.eval(ast, true);
                                 },
                                 .constructor => |constructor| {
-                                    var contents = std.ArrayList(Value).init(self.allocator);
-                                    errdefer contents.deinit();
-                                    for (0..constructor.numArgs) |j| {
-                                        const argName = try std.fmt.allocPrint(
-                                            self.allocator,
-                                            "_{s}{d}",
-                                            .{ constructor.name, j },
-                                        );
-                                        defer self.allocator.free(argName);
-                                        try contents.append(self.lookup(argName).?);
-                                    }
-                                    result = .{
-                                        .object = try self.objects.makeConstruct(constructor.name, contents),
-                                    };
+                                    result = try self.evalConstructor(constructor);
                                 },
                             }
                             if (numArgs > multiClos.argNames.items.len) {
@@ -947,9 +877,6 @@ pub const Interpreter = struct {
                             multiArgClosure.content.multiArgClosure.name = multiClos.name;
                             return .{ .value = .{ .object = multiArgClosure } };
                         }
-                    },
-                    .construct => {
-                        return error.UnexpectedType;
                     },
                 }
             },
@@ -1153,10 +1080,10 @@ pub const Interpreter = struct {
                 },
                 .case => |case| {
                     const caseValue = try self.eval(case.value, false);
-                    const construct = caseValue.object.content.construct;
+                    const construct = caseValue.construct;
                     for (case.patterns.items, case.bodies.items) |pattern, body| {
                         if (std.mem.eql(u8, pattern.name.lexeme, construct.name)) {
-                            for (construct.values.items, pattern.values.items) |val, name| {
+                            for (construct.values.?, pattern.values.items) |val, name| {
                                 try self.set(name.lexeme, val);
                                 try cleanup.append(name.lexeme);
                             }
@@ -1199,9 +1126,8 @@ pub const Interpreter = struct {
             .type => |typeDecl| {
                 for (typeDecl.constructors.items) |constructor| {
                     if (constructor.args.items.len == 0) {
-                        const contents = std.ArrayList(Value).init(self.allocator);
-                        const construct = try self.objects.makeConstruct(constructor.name.lexeme, contents);
-                        try self.set(constructor.name.lexeme, .{ .object = construct });
+                        const construct = try self.objects.makeConstruct(constructor.name.lexeme, null);
+                        try self.set(constructor.name.lexeme, construct);
                         return;
                     }
                     try self.argNameMap.put(constructor.name.lexeme, .init(self.allocator));

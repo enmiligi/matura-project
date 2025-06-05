@@ -8,6 +8,10 @@ pub const Value = union(enum) {
     bool: bool,
     char: u8,
     object: *object.Object,
+    construct: struct {
+        name: []const u8,
+        values: ?[]Value,
+    },
     builtinFunction: *const fn (self: *interpreter.Interpreter, arg: Value) anyerror!Value,
 };
 
@@ -66,76 +70,64 @@ pub fn debugPrintValue(value: Value, writer: std.io.AnyWriter) anyerror!void {
                         try writer.print("Value used before defined", .{});
                     }
                 },
-                .construct => |construct| {
-                    if (std.mem.eql(u8, construct.name, "Cons")) {
-                        const isString = switch (construct.values.items[0]) {
-                            .char => true,
-                            else => false,
-                        };
-                        if (isString) {
-                            try writer.print("\"", .{});
-                            try debugPrintChar(construct.values.items[0].char, writer);
-                        } else {
-                            try writer.print("[", .{});
-                            try debugPrintValue(construct.values.items[0], writer);
-                        }
-                        var restList = construct.values.items[1];
-                        while (true) {
-                            switch (restList) {
-                                .object => |restObj| {
-                                    switch (restObj.content) {
-                                        .construct => |restConstruct| {
-                                            if (std.mem.eql(u8, restConstruct.name, "Cons")) {
-                                                if (!isString) try writer.print(", ", .{});
-                                                if (isString) {
-                                                    try debugPrintChar(restConstruct.values.items[0].char, writer);
-                                                } else {
-                                                    try debugPrintValue(restConstruct.values.items[0], writer);
-                                                }
-                                                restList = restConstruct.values.items[1];
-                                            } else {
-                                                break;
-                                            }
-                                        },
-                                        else => {
-                                            unreachable;
-                                        },
-                                    }
-                                },
-                                else => {
-                                    unreachable;
-                                },
+            }
+        },
+        .construct => |construct| {
+            if (std.mem.eql(u8, construct.name, "Cons")) {
+                const isString = switch (construct.values.?[0]) {
+                    .char => true,
+                    else => false,
+                };
+                if (isString) {
+                    try writer.print("\"", .{});
+                    try debugPrintChar(construct.values.?[0].char, writer);
+                } else {
+                    try writer.print("[", .{});
+                    try debugPrintValue(construct.values.?[0], writer);
+                }
+                var restList = construct.values.?[1];
+                while (true) {
+                    switch (restList) {
+                        .construct => |restObj| {
+                            if (std.mem.eql(u8, restObj.name, "Cons")) {
+                                if (!isString) try writer.print(", ", .{});
+                                if (isString) {
+                                    try debugPrintChar(restObj.values.?[0].char, writer);
+                                } else {
+                                    try debugPrintValue(restObj.values.?[0], writer);
+                                }
+                                restList = restObj.values.?[1];
+                            } else {
+                                break;
                             }
-                        }
-                        if (isString) {
-                            try writer.print("\"", .{});
-                        } else {
-                            try writer.print("]", .{});
-                        }
-                    } else {
-                        try writer.print("{s}", .{construct.name});
-                        for (construct.values.items) |val| {
-                            switch (val) {
-                                .object => |obj2| {
-                                    switch (obj2.content) {
-                                        .construct => |construct2| {
-                                            if (construct2.values.items.len > 0) {
-                                                try writer.print(" (", .{});
-                                                try debugPrintValue(val, writer);
-                                                try writer.print(")", .{});
-                                                continue;
-                                            }
-                                        },
-                                        else => {},
-                                    }
-                                },
-                                else => {},
-                            }
-                            try writer.print(" ", .{});
-                            try debugPrintValue(val, writer);
-                        }
+                        },
+                        else => {
+                            unreachable;
+                        },
                     }
-                },
+                }
+                if (isString) {
+                    try writer.print("\"", .{});
+                } else {
+                    try writer.print("]", .{});
+                }
+            } else {
+                try writer.print("{s}", .{construct.name});
+                for (construct.values.?) |val| {
+                    switch (val) {
+                        .construct => |construct2| {
+                            if (construct2.values.?.len > 0) {
+                                try writer.print(" (", .{});
+                                try debugPrintValue(val, writer);
+                                try writer.print(")", .{});
+                                continue;
+                            }
+                        },
+                        else => {},
+                    }
+                    try writer.print(" ", .{});
+                    try debugPrintValue(val, writer);
+                }
             }
         },
         .builtinFunction => {
@@ -149,60 +141,46 @@ pub fn printValue(value: Value, writer: std.io.AnyWriter) anyerror!void {
         .char => |c| {
             try writer.print("{c}", .{c});
         },
-        .object => |obj| {
-            switch (obj.content) {
-                .construct => |construct| {
-                    if (std.mem.eql(u8, construct.name, "Cons")) {
-                        const isString = switch (construct.values.items[0]) {
-                            .char => true,
-                            else => false,
-                        };
-                        if (!isString) {
-                            try writer.print("[", .{});
-                        }
-                        if (isString) {
-                            try printValue(construct.values.items[0], writer);
-                        } else {
-                            try debugPrintValue(construct.values.items[0], writer);
-                        }
-                        var restList = construct.values.items[1];
-                        while (true) {
-                            switch (restList) {
-                                .object => |restObj| {
-                                    switch (restObj.content) {
-                                        .construct => |restConstruct| {
-                                            if (std.mem.eql(u8, restConstruct.name, "Cons")) {
-                                                if (!isString) try writer.print(", ", .{});
-                                                if (isString) {
-                                                    try printValue(restConstruct.values.items[0], writer);
-                                                } else {
-                                                    try debugPrintValue(restConstruct.values.items[0], writer);
-                                                }
-                                                restList = restConstruct.values.items[1];
-                                            } else {
-                                                break;
-                                            }
-                                        },
-                                        else => {
-                                            unreachable;
-                                        },
-                                    }
-                                },
-                                else => {
-                                    unreachable;
-                                },
+        .construct => |construct| {
+            if (std.mem.eql(u8, construct.name, "Cons")) {
+                const isString = switch (construct.values.?[0]) {
+                    .char => true,
+                    else => false,
+                };
+                if (!isString) {
+                    try writer.print("[", .{});
+                }
+                if (isString) {
+                    try printValue(construct.values.?[0], writer);
+                } else {
+                    try debugPrintValue(construct.values.?[0], writer);
+                }
+                var restList = construct.values.?[1];
+                while (true) {
+                    switch (restList) {
+                        .construct => |restConstruct| {
+                            if (std.mem.eql(u8, restConstruct.name, "Cons")) {
+                                if (!isString) try writer.print(", ", .{});
+                                if (isString) {
+                                    try printValue(restConstruct.values.?[0], writer);
+                                } else {
+                                    try debugPrintValue(restConstruct.values.?[0], writer);
+                                }
+                                restList = restConstruct.values.?[1];
+                            } else {
+                                break;
                             }
-                        }
-                        if (!isString) {
-                            try writer.print("]", .{});
-                        }
-                    } else {
-                        try debugPrintValue(value, writer);
+                        },
+                        else => {
+                            unreachable;
+                        },
                     }
-                },
-                else => {
-                    try debugPrintValue(value, writer);
-                },
+                }
+                if (!isString) {
+                    try writer.print("]", .{});
+                }
+            } else {
+                try debugPrintValue(value, writer);
             }
         },
         else => {

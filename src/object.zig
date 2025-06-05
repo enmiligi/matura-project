@@ -30,16 +30,10 @@ pub const Constructor = struct {
     name: []const u8,
 };
 
-pub const Construct = struct {
-    name: []const u8,
-    values: std.ArrayList(Value),
-};
-
 pub const ObjectContent = union(enum) {
     closure: Closure,
     multiArgClosure: MultiArgClosure,
     recurse: ?Value,
-    construct: Construct,
 };
 
 const GCStressTest: bool = false;
@@ -59,9 +53,6 @@ pub const Object = struct {
                 multiClos.bound.deinit();
                 multiClos.argNames.deinit();
             },
-            .construct => |construct| {
-                construct.values.deinit();
-            },
             else => {},
         }
         allocator.destroy(self);
@@ -79,6 +70,7 @@ pub const Object = struct {
 
 pub const Objects = struct {
     newestObject: ?*Object = null,
+    constructArrays: std.AutoHashMap([*]Value, struct { slice: []Value, marked: bool }),
     allocator: std.mem.Allocator,
     preserveValues: *std.ArrayList(Value),
     currentEnv: *Env,
@@ -97,6 +89,7 @@ pub const Objects = struct {
             .preserveValues = preserveValues,
             .currentEnv = currentEnv,
             .file = "builtin",
+            .constructArrays = .init(allocator),
         };
     }
 
@@ -106,6 +99,11 @@ pub const Objects = struct {
             object.deinit(self.allocator);
             self.newestObject = next;
         }
+        var constructIterator = self.constructArrays.iterator();
+        while (constructIterator.next()) |constructEntry| {
+            self.allocator.free(constructEntry.value_ptr.slice);
+        }
+        self.constructArrays.deinit();
     }
 
     fn markObject(self: *Objects, obj: *Object) void {
@@ -120,22 +118,7 @@ pub const Objects = struct {
                 },
                 .recurse => |rec| {
                     if (rec) |recValue| {
-                        switch (recValue) {
-                            .object => |recObj| {
-                                self.markObject(recObj);
-                            },
-                            else => {},
-                        }
-                    }
-                },
-                .construct => |construct| {
-                    for (construct.values.items) |value| {
-                        switch (value) {
-                            .object => |valObj| {
-                                self.markObject(valObj);
-                            },
-                            else => {},
-                        }
+                        self.markValue(recValue);
                     }
                 },
             }
@@ -157,27 +140,34 @@ pub const Objects = struct {
     fn markEnv(self: *Objects, env: *Env) void {
         var iter = env.contents.valueIterator();
         while (iter.next()) |value| {
-            switch (value.*) {
-                .object => |obj| {
-                    self.markObject(obj);
-                },
-                else => {},
-            }
+            self.markValue(value.*);
         }
         if (env.next) |nextEnv| {
             self.markEnv(nextEnv);
         }
     }
 
+    pub fn markValue(self: *Objects, val: Value) void {
+        switch (val) {
+            .object => |obj| {
+                self.markObject(obj);
+            },
+            .construct => |construct| {
+                if (construct.values) |values| {
+                    self.constructArrays.getPtr(values.ptr).?.marked = true;
+                    for (values) |constructVal| {
+                        self.markValue(constructVal);
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+
     pub fn mark(self: *Objects) void {
         var i: usize = 0;
         while (i < self.preserveValues.items.len) : (i += 1) {
-            switch (self.preserveValues.items[i]) {
-                .object => |obj| {
-                    self.markObject(obj);
-                },
-                else => {},
-            }
+            self.markValue(self.preserveValues.items[i]);
         }
         self.markEnv(self.currentEnv);
     }
@@ -201,6 +191,13 @@ pub const Objects = struct {
                 obj.marked = false;
                 prev = obj;
             }
+        }
+        var constructIterator = self.constructArrays.iterator();
+        while (constructIterator.next()) |constructValues| {
+            if (constructValues.value_ptr.marked) {
+                self.allocator.free(constructValues.value_ptr.slice);
+            }
+            constructValues.value_ptr.marked = false;
         }
     }
 
@@ -260,12 +257,13 @@ pub const Objects = struct {
         return object;
     }
 
-    pub fn makeConstruct(self: *Objects, name: []const u8, values: std.ArrayList(Value)) !*Object {
-        const object = try self.makeObject();
-        object.content = .{ .construct = .{
-            .values = values,
+    pub fn makeConstruct(self: *Objects, name: []const u8, values: ?[]Value) !Value {
+        if (values) |vals| {
+            try self.constructArrays.put(vals.ptr, .{ .slice = vals, .marked = false });
+        }
+        return .{ .construct = .{
             .name = name,
+            .values = values,
         } };
-        return object;
     }
 };
