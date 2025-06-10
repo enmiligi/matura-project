@@ -16,6 +16,10 @@ pub const ConvertList = struct {
                 } } };
                 errdefer listExpr.deinit(allocator);
 
+                for (list.values.items) |value| {
+                    try run(value, allocator);
+                }
+
                 for (1..list.values.items.len + 1) |i| {
                     const cons = try allocator.create(AST);
                     cons.* = .{ .identifier = .{ .token = .{

@@ -1083,8 +1083,8 @@ pub const Interpreter = struct {
                     const construct = caseValue.construct;
                     for (case.patterns.items, case.bodies.items) |pattern, body| {
                         if (std.mem.eql(u8, pattern.name.lexeme, construct.name)) {
-                            if (construct.values != null) {
-                                for (construct.values.?, pattern.values.items) |val, name| {
+                            if (construct.values) |constructValues| {
+                                for (constructValues, pattern.values.items) |val, name| {
                                     try self.set(name.lexeme, val);
                                     try cleanup.append(name.lexeme);
                                 }

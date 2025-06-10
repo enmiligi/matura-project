@@ -113,20 +113,22 @@ pub fn debugPrintValue(value: Value, writer: std.io.AnyWriter) anyerror!void {
                 }
             } else {
                 try writer.print("{s}", .{construct.name});
-                for (construct.values.?) |val| {
-                    switch (val) {
-                        .construct => |construct2| {
-                            if (construct2.values.?.len > 0) {
-                                try writer.print(" (", .{});
-                                try debugPrintValue(val, writer);
-                                try writer.print(")", .{});
-                                continue;
-                            }
-                        },
-                        else => {},
+                if (construct.values) |constructValues| {
+                    for (constructValues) |val| {
+                        switch (val) {
+                            .construct => |construct2| {
+                                if (construct2.values != null and construct2.values.?.len > 0) {
+                                    try writer.print(" (", .{});
+                                    try debugPrintValue(val, writer);
+                                    try writer.print(")", .{});
+                                    continue;
+                                }
+                            },
+                            else => {},
+                        }
+                        try writer.print(" ", .{});
+                        try debugPrintValue(val, writer);
                     }
-                    try writer.print(" ", .{});
-                    try debugPrintValue(val, writer);
                 }
             }
         },
