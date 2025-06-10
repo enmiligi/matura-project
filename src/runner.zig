@@ -46,15 +46,20 @@ pub const Runner = struct {
         errs: *errors.Errors,
         errbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
     ) !?u8 {
+        // The file name has been allocated and needs to be freed
         try self.fileNames.append(fileName);
         const fileContents = try file.readToEndAlloc(self.allocator, std.math.maxInt(usize));
         {
             errdefer self.allocator.free(fileContents);
             try self.sources.append(fileContents);
         }
+        // Change the source code of errors and the parser
         errs.newSource(fileName, fileContents);
         try fileParser.newSource(fileContents);
+
+        // Set the depth to max to ensure that parsed annotations don't prevent generalization
         algorithmJ.depth = std.math.maxInt(usize);
+        // Parse the file
         const statements = fileParser.file() catch |err| switch (err) {
             error.InvalidChar, error.UnexpectedToken, error.InvalidPrefix => {
                 try errbw.flush();
@@ -69,6 +74,8 @@ pub const Runner = struct {
             return err;
         };
         algorithmJ.depth = 0;
+
+        // Type check the statements
         for (statements.items) |*statement| {
             algorithmJ.checkStatement(statement.*) catch |err| switch (err) {
                 error.UnknownIdentifier,
@@ -86,6 +93,8 @@ pub const Runner = struct {
             };
             try optimizer.optimizeStatement(statement, self.allocator);
         }
+
+        // Interpret the new file
         interpreter_.newFile(fileName);
         for (statements.items) |statement| {
             interpreter_.runStatement(statement) catch |err| switch (err) {

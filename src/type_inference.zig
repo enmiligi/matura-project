@@ -79,6 +79,8 @@ pub const Constraint = struct {
     name: []const u8,
 };
 
+// Gather all constraints and type variables contained in type
+// in order to use them for printing
 fn collectConstraintsAndTypeVars(
     t: *Type,
     constraints: *std.AutoArrayHashMap(*Type, Constraint),
@@ -140,6 +142,7 @@ fn collectConstraintsAndTypeVars(
     }
 }
 
+// Print all the constraints that a type has
 pub fn printConstraints(
     t: *Type,
     writer: std.io.AnyWriter,
@@ -169,6 +172,7 @@ pub fn printConstraints(
     }
 }
 
+// Print the type with Number constraints left out
 pub fn printTypeWithoutConstraints(
     t: *Type,
     writer: std.io.AnyWriter,
@@ -234,6 +238,7 @@ pub fn printTypeWithoutConstraints(
     }
 }
 
+// Print the whole type
 pub fn printType(
     t: *Type,
     writer: std.io.AnyWriter,
@@ -334,12 +339,8 @@ pub const AlgorithmJ = struct {
         self.constructorToType.deinit();
     }
 
-    pub fn getType(self: *AlgorithmJ, expr: *AST) !*Type {
-        var typeEnv = TypeEnv.init(self.allocator);
-        defer typeEnv.deinit();
-        return self.run(&typeEnv, expr);
-    }
-
+    // Create a new type variable with current depth
+    // and number
     fn newVar(self: *AlgorithmJ) TypeVar {
         self.currentTypeVar += 1;
         return .{
@@ -349,13 +350,16 @@ pub const AlgorithmJ = struct {
         };
     }
 
-    pub fn newVarT(self: *AlgorithmJ) Type {
+    // Create a new type variable as a Type
+    pub inline fn newVarT(self: *AlgorithmJ) Type {
         return .{ .data = .{ .typeVar = self.newVar() }, .rc = 1 };
     }
 
     // This function is used for checking if there is an infinite type
     // and also adjust the depth since typeVarA will be substituted with
-    // something containing typeB if not to not have two traversals
+    // something containing typeB, in order to not have two traversals
+    // The depth needs to be the lower of both, since if one can't be generalised
+    // the other also shouldn't
     fn containsAndShiftDepth(typeVarA: *TypeVar, typeB: *Type) bool {
         switch (typeB.data) {
             .typeVar => |*typeVarB| {
@@ -390,6 +394,7 @@ pub const AlgorithmJ = struct {
         }
     }
 
+    // Add a Substitution by modifying the type variable
     fn addSubstitution(typeVarA: *TypeVar, typeB: *Type) !void {
         var typeToSubstitute = typeB;
         var substituted = true;
@@ -420,6 +425,7 @@ pub const AlgorithmJ = struct {
         typeVarA.subst = typeB;
     }
 
+    // Unify two types, but typeA must be <= typeB
     fn lessGeneralUnify(self: *AlgorithmJ, typeA: *Type, typeB: *Type) !void {
         switch (typeA.data) {
             .typeVar => |tV1| {
@@ -844,7 +850,7 @@ pub const AlgorithmJ = struct {
         }
     }
 
-    // Find all free vars
+    // Find all free vars, then put them in a forall
     pub fn generalise(self: *AlgorithmJ, t: *Type, minDepth: usize) !*TypeScheme {
         var freeVars = TypeVarSet.init(self.allocator);
         try self.findFreeVars(t, minDepth, &freeVars);
@@ -857,11 +863,7 @@ pub const AlgorithmJ = struct {
         return typeScheme;
     }
 
-    fn lookup(self: *AlgorithmJ, name: []const u8, typeEnv: *TypeEnv) ?*TypeScheme {
-        return typeEnv.get(name) orelse self.globalTypes.get(name);
-    }
-
-    fn getLetVarType(self: *AlgorithmJ, typeEnv: *TypeEnv, name: token.Token, value: *AST, annotation: ?TypeAnnotation) anyerror!*TypeScheme {
+    fn getLetVarType(self: *AlgorithmJ, name: token.Token, value: *AST, annotation: ?TypeAnnotation) anyerror!*TypeScheme {
         self.depth += 1;
         const typeOfVarTypeVar = try Type.init(self.allocator);
         typeOfVarTypeVar.* = self.newVarT();
@@ -872,9 +874,9 @@ pub const AlgorithmJ = struct {
         typeOfVarScheme.* = .{ .type = typeOfVarTypeVar };
         {
             errdefer deinitScheme(typeOfVarScheme, self.allocator);
-            try typeEnv.put(name.lexeme, typeOfVarScheme);
+            try self.globalTypes.put(name.lexeme, typeOfVarScheme);
         }
-        const typeOfVar = try self.run(typeEnv, value);
+        const typeOfVar = try self.run(value);
         {
             errdefer typeOfVar.deinit(self.allocator);
             self.unify(typeOfVarTypeVar, typeOfVar) catch |err| switch (err) {
@@ -922,12 +924,12 @@ pub const AlgorithmJ = struct {
     }
 
     // The main algorithm as described in the paper
-    fn run(self: *AlgorithmJ, typeEnv: *TypeEnv, ast: *AST) !*Type {
+    fn run(self: *AlgorithmJ, ast: *AST) !*Type {
         const t = try Type.init(self.allocator);
         switch (ast.*) {
             .identifier => |id| {
                 self.allocator.destroy(t);
-                if (self.lookup(id.token.lexeme, typeEnv)) |typeOfIdScheme| {
+                if (self.globalTypes.get(id.token.lexeme)) |typeOfIdScheme| {
                     switch (typeOfIdScheme.*) {
                         .type => |typeOfId| {
                             typeOfId.rc += 1;
@@ -964,7 +966,7 @@ pub const AlgorithmJ = struct {
                     t.data = .{ .primitive = .Bool };
                 }
                 errdefer t.deinit(self.allocator);
-                const typeOfExpr = try self.run(typeEnv, prefixOp.expr);
+                const typeOfExpr = try self.run(prefixOp.expr);
                 defer typeOfExpr.deinit(self.allocator);
                 self.unify(typeOfExpr, t) catch |err| switch (err) {
                     error.CouldNotUnify => {
@@ -985,10 +987,10 @@ pub const AlgorithmJ = struct {
             },
             .operator => |op| {
                 errdefer self.allocator.destroy(t);
-                const leftType = try self.run(typeEnv, op.left);
+                const leftType = try self.run(op.left);
                 defer leftType.deinit(self.allocator);
                 if (op.token.lexeme[0] == ';') {
-                    const rightType = try self.run(typeEnv, op.right);
+                    const rightType = try self.run(op.right);
                     self.allocator.destroy(t);
                     return rightType;
                 } else if (op.token.lexeme[0] != '=' and op.token.lexeme[0] != '!') {
@@ -1019,7 +1021,7 @@ pub const AlgorithmJ = struct {
                         },
                     };
                 }
-                const rightType = try self.run(typeEnv, op.right);
+                const rightType = try self.run(op.right);
                 errdefer rightType.deinit(self.allocator);
                 self.unify(leftType, rightType) catch |err| switch (err) {
                     error.CouldNotUnify => {
@@ -1055,7 +1057,7 @@ pub const AlgorithmJ = struct {
                     .primitive = .Bool,
                 };
                 defer boolT.deinit(self.allocator);
-                const typeOfPredicate = try self.run(typeEnv, ifExpr.predicate);
+                const typeOfPredicate = try self.run(ifExpr.predicate);
                 defer typeOfPredicate.deinit(self.allocator);
                 self.unify(boolT, typeOfPredicate) catch |err| switch (err) {
                     error.CouldNotUnify => {
@@ -1073,9 +1075,9 @@ pub const AlgorithmJ = struct {
                         return err;
                     },
                 };
-                const typeOfThen = try self.run(typeEnv, ifExpr.thenExpr);
+                const typeOfThen = try self.run(ifExpr.thenExpr);
                 defer typeOfThen.deinit(self.allocator);
-                const typeOfElse = try self.run(typeEnv, ifExpr.elseExpr);
+                const typeOfElse = try self.run(ifExpr.elseExpr);
                 errdefer typeOfElse.deinit(self.allocator);
                 self.unify(typeOfThen, typeOfElse) catch |err| switch (err) {
                     error.CouldNotUnify => {
@@ -1105,9 +1107,9 @@ pub const AlgorithmJ = struct {
             .call => |call| {
                 t.* = self.newVarT();
                 errdefer t.deinit(self.allocator);
-                const t1 = try self.run(typeEnv, call.function);
+                const t1 = try self.run(call.function);
                 defer t1.deinit(self.allocator);
-                const t2 = try self.run(typeEnv, call.arg);
+                const t2 = try self.run(call.arg);
                 defer t2.deinit(self.allocator);
                 const fType = try Type.init(self.allocator);
                 t2.rc += 1;
@@ -1154,7 +1156,7 @@ pub const AlgorithmJ = struct {
                 }
                 typeScheme.* = .{ .type = newTypeVar };
                 newTypeVar.rc += 1;
-                if (typeEnv.contains(lambda.argname.lexeme)) {
+                if (self.globalTypes.contains(lambda.argname.lexeme)) {
                     deinitScheme(typeScheme, self.allocator);
                     try self.errors.errorAt(
                         lambda.argname.start,
@@ -1166,11 +1168,11 @@ pub const AlgorithmJ = struct {
                 }
                 {
                     errdefer deinitScheme(typeScheme, self.allocator);
-                    try typeEnv.put(lambda.argname.lexeme, typeScheme);
+                    try self.globalTypes.put(lambda.argname.lexeme, typeScheme);
                 }
-                const returnType = try self.run(typeEnv, lambda.expr);
+                const returnType = try self.run(lambda.expr);
                 errdefer returnType.deinit(self.allocator);
-                _ = typeEnv.remove(lambda.argname.lexeme);
+                _ = self.globalTypes.remove(lambda.argname.lexeme);
                 deinitScheme(typeScheme, self.allocator);
                 t.data = .{ .function = .{
                     .from = newTypeVar,
@@ -1201,7 +1203,7 @@ pub const AlgorithmJ = struct {
             },
             .let => |let| {
                 self.allocator.destroy(t);
-                if (typeEnv.contains(let.name.lexeme)) {
+                if (self.globalTypes.contains(let.name.lexeme)) {
                     try self.errors.errorAt(
                         let.name.start,
                         let.name.end,
@@ -1210,17 +1212,17 @@ pub const AlgorithmJ = struct {
                     );
                     return error.CouldNotUnify;
                 }
-                const generalised = try self.getLetVarType(typeEnv, let.name, let.be, let.type);
-                try typeEnv.put(let.name.lexeme, generalised);
-                const typeOfExpr = try self.run(typeEnv, let.in);
+                const generalised = try self.getLetVarType(let.name, let.be, let.type);
+                try self.globalTypes.put(let.name.lexeme, generalised);
+                const typeOfExpr = try self.run(let.in);
                 errdefer typeOfExpr.deinit(self.allocator);
-                _ = typeEnv.remove(let.name.lexeme);
+                _ = self.globalTypes.remove(let.name.lexeme);
                 deinitScheme(generalised, self.allocator);
                 return typeOfExpr;
             },
             .case => |case| {
                 self.allocator.destroy(t);
-                const typeOfValue = try self.run(typeEnv, case.value);
+                const typeOfValue = try self.run(case.value);
                 defer typeOfValue.deinit(self.allocator);
                 var type_: ?[]const u8 = null;
                 for (case.patterns.items) |pattern| {
@@ -1360,7 +1362,7 @@ pub const AlgorithmJ = struct {
                                 );
                             },
                             .function => |func| {
-                                if (typeEnv.contains(value.lexeme)) {
+                                if (self.globalTypes.contains(value.lexeme)) {
                                     try self.errors.errorAt(
                                         value.start,
                                         value.end,
@@ -1374,7 +1376,7 @@ pub const AlgorithmJ = struct {
 
                                 valueScheme.* = .{ .type = func.from };
                                 func.from.rc += 1;
-                                try typeEnv.put(value.lexeme, valueScheme);
+                                try self.globalTypes.put(value.lexeme, valueScheme);
                                 constrType = func.to;
                             },
                             else => {
@@ -1382,11 +1384,11 @@ pub const AlgorithmJ = struct {
                             },
                         }
                     }
-                    const bodyType = try self.run(typeEnv, body);
+                    const bodyType = try self.run(body);
                     defer bodyType.deinit(self.allocator);
                     for (pattern.values.items) |value| {
-                        deinitScheme(typeEnv.get(value.lexeme).?, self.allocator);
-                        _ = typeEnv.remove(value.lexeme);
+                        deinitScheme(self.globalTypes.get(value.lexeme).?, self.allocator);
+                        _ = self.globalTypes.remove(value.lexeme);
                     }
                     self.unify(resultType, bodyType) catch |err| switch (err) {
                         error.CouldNotUnify => {
@@ -1419,7 +1421,7 @@ pub const AlgorithmJ = struct {
                 t.* = self.newVarT();
                 errdefer t.deinit(self.allocator);
                 for (list.values.items, 0..) |value, i| {
-                    const typeOfVal = try self.run(typeEnv, value);
+                    const typeOfVal = try self.run(value);
                     defer typeOfVal.deinit(self.allocator);
                     self.unify(t, typeOfVal) catch |err| switch (err) {
                         error.CouldNotUnify => {
@@ -1475,7 +1477,7 @@ pub const AlgorithmJ = struct {
                     try self.errors.errorAt(let.name.start, let.name.end, "The name '{s}' is already used.", .{let.name.lexeme});
                     return error.CouldNotUnify;
                 }
-                const t = try self.getLetVarType(&self.globalTypes, let.name, let.be, let.annotation);
+                const t = try self.getLetVarType(let.name, let.be, let.annotation);
                 errdefer deinitScheme(t, self.allocator);
                 try self.globalTypes.put(let.name.lexeme, t);
             },

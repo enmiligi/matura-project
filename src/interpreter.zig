@@ -819,6 +819,9 @@ pub const Interpreter = struct {
                     .multiArgClosure => |multiClos| {
                         try self.pushValue(function);
                         const numArgs = endI;
+                        // Only if the exact number of arguments is supplied
+                        // and you are in tail position, you can perform
+                        // tail call optimization
                         if (tailPosition and self.tco and numArgs == multiClos.argNames.items.len) {
                             var i: usize = 0;
                             var arguments: std.ArrayList(Value) = .init(self.allocator);
@@ -865,6 +868,7 @@ pub const Interpreter = struct {
                                 break;
                             }
                         }
+                        // If enough arguments are supplied, push env and evaluate body
                         if (numArgs >= multiClos.argNames.items.len) {
                             i = 0;
                             while (i < multiClos.argNames.items.len) : (i += 1) {
@@ -948,6 +952,29 @@ pub const Interpreter = struct {
         }
     }
 
+    pub fn evalLetDefinition(self: *Interpreter, name: token.Token, be: *AST) !void {
+        const recursionPointer = try self.objects.makeRecurse();
+        try self.set(name.lexeme, .{ .object = recursionPointer });
+        const isLambda = switch (be.*) {
+            .lambda, .lambdaMult => true,
+            else => false,
+        };
+        const val = try self.eval(be, false);
+        if (isLambda) {
+            switch (val.object.content) {
+                .closure => |*clos| {
+                    clos.name = name.lexeme;
+                },
+                .multiArgClosure => |*multiClos| {
+                    multiClos.name = name.lexeme;
+                },
+                else => {},
+            }
+        }
+        recursionPointer.content.recurse = val;
+        try self.set(name.lexeme, val);
+    }
+
     // Evaluate an expression
     pub fn eval(self: *Interpreter, ast: *AST, tailPosition: bool) anyerror!Value {
         var toEval: *AST = ast;
@@ -1005,29 +1032,7 @@ pub const Interpreter = struct {
                     return idValue orelse error.UnknownIdentifier;
                 },
                 .let => |let| {
-                    // To enable recursion, a special object is put,
-                    // which contains an optional value that is then later changed
-                    // to the actual result
-                    const recursionPointer = try self.objects.makeRecurse();
-                    try self.set(let.name.lexeme, .{ .object = recursionPointer });
-                    const valOfVar = try self.eval(let.be, false);
-                    const isLambda = switch (let.be.*) {
-                        .lambda, .lambdaMult => true,
-                        else => false,
-                    };
-                    recursionPointer.content.recurse = valOfVar;
-                    try self.set(let.name.lexeme, valOfVar);
-                    if (isLambda) {
-                        switch (valOfVar.object.content) {
-                            .closure => |*clos| {
-                                clos.name = let.name.lexeme;
-                            },
-                            .multiArgClosure => |*multiClos| {
-                                multiClos.name = let.name.lexeme;
-                            },
-                            else => {},
-                        }
-                    }
+                    try self.evalLetDefinition(let.name, let.be);
                     try cleanup.append(let.name.lexeme);
                     toEval = let.in;
                 },
@@ -1084,6 +1089,7 @@ pub const Interpreter = struct {
                     return .{ .object = closure };
                 },
                 .operator => |op| {
+                    // Handle operators
                     const left = try self.eval(op.left, false);
                     if (op.token.lexeme[0] == ';') {
                         toEval = op.right;
@@ -1092,6 +1098,7 @@ pub const Interpreter = struct {
                     try self.pushValue(left);
                     const right = try self.eval(op.right, false);
                     self.popValue();
+                    // Determine whether it is arithmetic or a comparison
                     switch (op.token.lexeme[0]) {
                         '+', '-', '*', '/' => {
                             return self.evalNumberOp(op.token, left, right);
@@ -1130,6 +1137,7 @@ pub const Interpreter = struct {
                     }
                 },
                 .case => |case| {
+                    // Switch based on constructor
                     const caseValue = try self.eval(case.value, false);
                     const construct = caseValue.construct;
                     for (case.patterns.items, case.bodies.items) |pattern, body| {
@@ -1156,29 +1164,11 @@ pub const Interpreter = struct {
     pub fn runStatement(self: *Interpreter, statement: Statement) !void {
         switch (statement) {
             .let => |let| {
-                const recursionPointer = try self.objects.makeRecurse();
-                try self.set(let.name.lexeme, .{ .object = recursionPointer });
-                const isLambda = switch (let.be.*) {
-                    .lambda, .lambdaMult => true,
-                    else => false,
-                };
-                const val = try self.eval(let.be, false);
-                if (isLambda) {
-                    switch (val.object.content) {
-                        .closure => |*clos| {
-                            clos.name = let.name.lexeme;
-                        },
-                        .multiArgClosure => |*multiClos| {
-                            multiClos.name = let.name.lexeme;
-                        },
-                        else => {},
-                    }
-                }
-                recursionPointer.content.recurse = val;
-                try self.set(let.name.lexeme, val);
+                try self.evalLetDefinition(let.name, let.be);
             },
             .type => |typeDecl| {
                 for (typeDecl.constructors.items) |constructor| {
+                    // If the constructor takes no arguments, it is represented as a constant
                     if (constructor.args.items.len == 0) {
                         const construct = try self.objects.makeConstruct(constructor.name.lexeme, null);
                         try self.set(constructor.name.lexeme, construct);
@@ -1187,6 +1177,7 @@ pub const Interpreter = struct {
                     try self.argNameMap.put(constructor.name.lexeme, .init(self.allocator));
                     var argNames = self.argNameMap.getPtr(constructor.name.lexeme).?;
 
+                    // Args to the constructor are named like _Constructor0
                     for (0..constructor.args.items.len) |i| {
                         const argName = try std.fmt.allocPrint(self.allocator, "_{s}{d}", .{
                             constructor.name.lexeme,
@@ -1198,6 +1189,7 @@ pub const Interpreter = struct {
                     var bound = std.StringHashMap(Value).init(self.allocator);
                     errdefer bound.deinit();
 
+                    // Create a multi-argument closure with the body being the constructor
                     const multiArgClosure = try self.objects.makeMultiArgClosure(try argNames.clone(), bound, .{ .constructor = .{
                         .numArgs = constructor.args.items.len,
                         .name = constructor.name.lexeme,

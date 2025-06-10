@@ -31,6 +31,8 @@ fn debugPrintChar(char: u8, writer: std.io.AnyWriter) !void {
     try writer.print("{s}", .{out});
 }
 
+// Print a value for debugging, where strings are printed with quotes
+// and escape characters are printed like you would input them
 pub fn debugPrintValue(value: Value, writer: std.io.AnyWriter) anyerror!void {
     switch (value) {
         .float => |f| {
@@ -138,6 +140,7 @@ pub fn debugPrintValue(value: Value, writer: std.io.AnyWriter) anyerror!void {
     }
 }
 
+// Print a value
 pub fn printValue(value: Value, writer: std.io.AnyWriter) anyerror!void {
     switch (value) {
         .char => |c| {
