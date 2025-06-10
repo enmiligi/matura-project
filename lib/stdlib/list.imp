@@ -2,37 +2,37 @@ let concat: List a -> List a -> List a =
     lambda xs. lambda ys.
         case xs of
             Nil => ys
-          | Cons x rest => Cons x (concat rest ys)
+            | Cons x rest => Cons x (concat rest ys)
 
 let get: List a -> Int -> Option a =
     lambda xs. lambda i.
         case xs of
             Nil => None
-          | Cons x rest =>
-            if (i == 0) then
-                Some x
-            else if (i < 0) then
-                None
-            else
-                get rest (i - 1)
+            | Cons x rest =>
+                if (i == 0) then
+                    Some x
+                else if (i < 0) then
+                    None
+                else
+                    get rest (i - 1)
 
 let getOrDefault: List a -> Int -> a -> a =
     lambda xs. lambda i. lambda default.
         case get xs i of
             None => default
-          | Some a => a
+            | Some a => a
 
 let set: List a -> Int -> a -> List a =
     lambda xs. lambda i. lambda value.
         case xs of
             Nil => Nil
-          | Cons x rest =>
-            if i == 0 then
-                Cons value rest
-            else if i < 0 then
-                xs
-            else
-                Cons x (set rest (i - 1) value)
+            | Cons x rest =>
+                if i == 0 then
+                    Cons value rest
+                else if i < 0 then
+                    xs
+                else
+                    Cons x (set rest (i - 1) value)
 
 let foldl: (b -> a -> b) -> b -> List a -> b =
     lambda conj. lambda acc. lambda xs.
@@ -51,3 +51,9 @@ let foldr: (a -> b -> b) -> b -> List a -> b =
 let map: (a -> b) -> List a -> List b =
     lambda f. lambda xs.
         reverse (foldl (lambda acc. lambda x. Cons (f x) acc) Nil xs)
+
+let filter: (a -> Bool) -> List a -> List a =
+    lambda pred. lambda xs.
+        foldr
+            (lambda x. lambda acc. if pred x then Cons x acc else acc)
+            Nil xs

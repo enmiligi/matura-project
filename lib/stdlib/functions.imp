@@ -1,3 +1,10 @@
+let id: a -> a =
+    lambda x. x
+
 let flip: (a -> b -> c) -> (b -> a -> c) =
     lambda f. lambda y. lambda x.
         f x y
+
+let comp: (b -> c) -> (a -> b) -> (a -> c) =
+    lambda f. lambda g. lambda x.
+        f (g x)
