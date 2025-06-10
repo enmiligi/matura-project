@@ -90,7 +90,7 @@ pub const Lexer = struct {
                 self.location += 2;
                 return self.makeToken(.Arrow);
             }
-            if (c == '=' or c == '!') {
+            if (c == '=' or c == '!' or c == '<' or c == '>') {
                 return self.doubleOperator();
             }
             const tt: ?token.TokenType = switch (c) {
@@ -102,7 +102,7 @@ pub const Lexer = struct {
                 ':' => .Colon,
                 ',' => .Comma,
                 '|' => .VBar,
-                '+', '-', '*', '/', '<', '>', ';' => .Operator,
+                '+', '-', '*', '/', ';' => .Operator,
                 else => null,
             };
             if (tt) |value| {
@@ -155,14 +155,12 @@ pub const Lexer = struct {
             } else {
                 tt = .Equal;
             }
-        } else if (self.getChar() == '!') {
+        } else if (self.getChar() == '!' or self.getChar() == '<' or self.getChar() == '>') {
             self.location += 1;
             if (self.getChar() == '=') {
                 self.location += 1;
-                tt = .Operator;
-            } else {
-                tt = .Operator;
             }
+            tt = .Operator;
         }
         return self.makeToken(tt);
     }

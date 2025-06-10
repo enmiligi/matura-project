@@ -1,6 +1,6 @@
 let excludeMultiples = lambda x. lambda max. lambda isPrimeList.
     let excludeHelper = lambda n. lambda acc.
-        if !(n > max) then
+        if n <= max then
             excludeHelper (n + x) (set acc (n - 1) False)
         else
             acc
@@ -37,14 +37,14 @@ let sieve = lambda max.
 
 let primes = lambda max.
     let s = sieve max in
-    let helper = lambda x.
+    let helper = lambda x. lambda acc.
         let next = findNext max x s in
             if next == -1 then
-                Nil
+                acc
             else
-                Cons next (helper (next + 1))
+                helper (next + 1) (Cons next acc)
     in
-        helper 2
+        reverse (helper 2 Nil)
 
 let main = lambda x.
     print (primes 20)

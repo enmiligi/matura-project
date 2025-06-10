@@ -385,8 +385,8 @@ pub const Interpreter = struct {
                 switch (right) {
                     .int => |int2| {
                         const res = switch (op.lexeme[0]) {
-                            '<' => int1 < int2,
-                            '>' => int1 > int2,
+                            '<' => if (op.lexeme.len == 1) int1 < int2 else int1 <= int2,
+                            '>' => if (op.lexeme.len == 1) int1 > int2 else int1 >= int2,
                             '=' => int1 == int2,
                             '!' => int1 != int2,
                             else => undefined,
@@ -402,8 +402,8 @@ pub const Interpreter = struct {
                 switch (right) {
                     .float => |float2| {
                         const res = switch (op.lexeme[0]) {
-                            '<' => float1 < float2,
-                            '>' => float1 > float2,
+                            '<' => if (op.lexeme.len == 1) float1 < float2 else float1 <= float2,
+                            '>' => if (op.lexeme.len == 1) float1 > float2 else float1 >= float2,
                             '=' => float1 == float2,
                             '!' => float1 != float2,
                             else => undefined,
