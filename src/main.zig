@@ -17,7 +17,7 @@ const MainError = error{
 
 pub fn main() !u8 {
     // Initialize allocator for memory management
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 20 }).init;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
 
