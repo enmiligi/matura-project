@@ -9,6 +9,8 @@ pub const TypeAnnotation = struct {
     region: Region,
 };
 
+// A pattern consists of a name for the Constructor
+// and the names for the content of the constructor
 pub const Pattern = struct {
     name: token.Token,
     values: std.ArrayList(token.Token),
@@ -40,6 +42,8 @@ pub const AST = union(enum) {
         expr: *AST,
         encloses: ?std.ArrayList([]const u8) = null,
     },
+    // The lambdaMult ast node combines consecutive lambdas into one object
+    // in order to be able to more easily optimize function calls
     lambdaMult: struct {
         start: usize,
         argnames: std.ArrayList(token.Token),
@@ -56,6 +60,8 @@ pub const AST = union(enum) {
         function: *AST,
         arg: *AST,
     },
+    // The callMult ast node combines consecutive calls into one object
+    // in order to be able to more easily optimize function calls
     callMult: struct {
         function: *AST,
         args: std.ArrayList(*AST),
@@ -281,6 +287,7 @@ pub const AST = union(enum) {
 };
 
 pub const Statement = union(enum) {
+    // This type is needed for the declaration of types
     pub const Constructor = struct {
         name: token.Token,
         args: std.ArrayList(*Type),
@@ -291,6 +298,8 @@ pub const Statement = union(enum) {
         be: *AST,
         annotation: ?TypeAnnotation,
     },
+    // The type statement declares a type of a given name
+    // and stores the constructors in an array
     type: struct {
         name: token.Token,
         compositeType: *Type,

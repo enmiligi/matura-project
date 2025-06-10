@@ -90,6 +90,7 @@ pub const Errors = struct {
         }
     }
 
+    // Indicate the region of code from which originates the ast
     fn indicateAST(self: *Errors, ast: *AST, comptime msg: []const u8, args: anytype, err: bool) !void {
         try self.indicateRegion(utils.computeBoundaries(ast), msg, args, err);
     }
@@ -404,6 +405,8 @@ pub const Errors = struct {
         try self.indicateRegion(reasonAt, "", .{}, false);
     }
 
+    // This error is used when a type is annotated that is more general
+    // than the type of the value it describes according to inference
     pub fn tooGeneralArgumentType(
         self: *Errors,
         ast: *AST,
@@ -423,6 +426,8 @@ pub const Errors = struct {
         try self.stderr.print("\n", .{});
     }
 
+    // This error is thrown when the type of a variable is less general
+    // than the type that is annotated
     pub fn tooGeneralVariableType(
         self: *Errors,
         ast: *AST,
@@ -432,7 +437,7 @@ pub const Errors = struct {
         try self.indicateRegion(annotatedRegion, "This type is annotated", .{}, true);
         try self.indicateRegion(
             utils.computeBoundaries(ast),
-            "which is more general than the type of this argument",
+            "which is more general than the type of this variable",
             .{},
             false,
         );

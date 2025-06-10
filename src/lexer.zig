@@ -130,6 +130,7 @@ pub const Lexer = struct {
         return tokens;
     }
 
+    // Make a token at the current location
     // Tokens have their end one past the last character
     fn makeToken(self: *Lexer, tt: token.TokenType) token.Token {
         const t: token.Token = .{
@@ -142,6 +143,7 @@ pub const Lexer = struct {
         return t;
     }
 
+    // Handle operators that consist of 2 characters
     fn doubleOperator(self: *Lexer) !token.Token {
         var tt: token.TokenType = undefined;
         if (self.getChar() == '=') {
@@ -191,6 +193,8 @@ pub const Lexer = struct {
         return self.makeToken(tt);
     }
 
+    // Go over all whitespace and create New Statement token if
+    // the current line is not indented
     fn skipWhitespace(self: *Lexer) ?token.Token {
         var newLineOccurred = false;
         while (!self.isAtEnd() and std.ascii.isWhitespace(self.getChar())) {
@@ -208,11 +212,13 @@ pub const Lexer = struct {
         return null;
     }
 
-    fn getChar(self: *Lexer) u8 {
+    // Get the current character
+    inline fn getChar(self: *Lexer) u8 {
         return self.source[self.location];
     }
 
-    fn getTokenString(self: *Lexer) []const u8 {
+    // Get the current token lexeme
+    inline fn getTokenString(self: *Lexer) []const u8 {
         return self.source[self.tokenStart..self.location];
     }
 };

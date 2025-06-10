@@ -39,6 +39,7 @@ pub const ObjectContent = union(enum) {
 const GCStressTest: bool = false;
 const GCLog: bool = false;
 
+// Objects make a linked list so easy iteration over all objects is possible
 pub const Object = struct {
     content: ObjectContent,
     marked: bool,
@@ -68,6 +69,7 @@ pub const Object = struct {
     }
 };
 
+// Helper struct to create and free objects
 pub const Objects = struct {
     newestObject: ?*Object = null,
     constructArrays: std.AutoHashMap([*]Value, struct { slice: []Value, marked: bool }),
@@ -93,6 +95,7 @@ pub const Objects = struct {
         };
     }
 
+    // Delete all objects and constructs
     pub fn deinit(self: *Objects) void {
         while (self.newestObject) |object| {
             const next = object.next;
@@ -106,6 +109,7 @@ pub const Objects = struct {
         self.constructArrays.deinit();
     }
 
+    // Mark all objects contained in the object
     fn markObject(self: *Objects, obj: *Object) void {
         if (!obj.marked) {
             obj.marked = true;
@@ -125,18 +129,15 @@ pub const Objects = struct {
         }
     }
 
+    // Mark all values referenced in the map
     fn markMap(self: *Objects, map: *std.StringHashMap(Value)) void {
         var iter = map.valueIterator();
         while (iter.next()) |value| {
-            switch (value.*) {
-                .object => |obj| {
-                    self.markObject(obj);
-                },
-                else => {},
-            }
+            self.markValue(value.*);
         }
     }
 
+    // Mark all values contained in the Environment and its parents
     fn markEnv(self: *Objects, env: *Env) void {
         var iter = env.contents.valueIterator();
         while (iter.next()) |value| {
@@ -147,6 +148,7 @@ pub const Objects = struct {
         }
     }
 
+    // Mark the object or all values contained in the construct
     pub fn markValue(self: *Objects, val: Value) void {
         switch (val) {
             .object => |obj| {
@@ -164,6 +166,7 @@ pub const Objects = struct {
         }
     }
 
+    // Mark all root objects
     pub fn mark(self: *Objects) void {
         var i: usize = 0;
         while (i < self.preserveValues.items.len) : (i += 1) {
@@ -172,6 +175,7 @@ pub const Objects = struct {
         self.markEnv(self.currentEnv);
     }
 
+    // Delete all objects that weren't marked
     pub fn sweep(self: *Objects) void {
         var o = self.newestObject;
         var prev: ?*Object = null;
@@ -201,6 +205,7 @@ pub const Objects = struct {
         }
     }
 
+    // Create an object
     fn makeObject(self: *Objects) !*Object {
         if (GCStressTest or self.objCount > self.objCountUntilGC) {
             self.mark();
@@ -217,6 +222,7 @@ pub const Objects = struct {
         return object;
     }
 
+    // Create a closure
     pub fn makeClosure(self: *Objects, argName: token.Token, bound: std.StringHashMap(Value), code: Code) !*Object {
         const objectContent: ObjectContent = .{ .closure = .{
             .argName = argName,
@@ -230,6 +236,7 @@ pub const Objects = struct {
         return object;
     }
 
+    // Create a closure that takes several arguments
     pub fn makeMultiArgClosure(self: *Objects, argNames: std.ArrayList(token.Token), bound: std.StringHashMap(Value), code: Code) !*Object {
         const object = try self.makeObject();
         object.content = .{ .multiArgClosure = .{
@@ -242,12 +249,14 @@ pub const Objects = struct {
         return object;
     }
 
+    // Create a helper object that can later be filled with the correct value
     pub fn makeRecurse(self: *Objects) !*Object {
         const object = try self.makeObject();
         object.content = .{ .recurse = null };
         return object;
     }
 
+    // Create a constructor
     pub fn makeConstructor(self: *Objects, name: []const u8, numArgs: usize) !*Object {
         const object = try self.makeObject();
         object.content = .{ .constructor = .{
@@ -257,6 +266,7 @@ pub const Objects = struct {
         return object;
     }
 
+    // Create a construct
     pub fn makeConstruct(self: *Objects, name: []const u8, values: ?[]Value) !Value {
         if (values) |vals| {
             try self.constructArrays.put(vals.ptr, .{ .slice = vals, .marked = false });

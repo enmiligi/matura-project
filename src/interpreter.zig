@@ -10,12 +10,14 @@ const utils = @import("./utils.zig");
 
 pub const EvalError = error{
     UnknownIdentifier,
+    // Error if an integer overflow happened
     Overflow,
 
     // This should never happen because of the type inference/checking
     UnexpectedType,
 } || std.mem.Allocator.Error;
 
+// The Env doubles up as a sort of "stack frame"
 pub const Env = struct {
     contents: *std.StringHashMap(Value),
     name: []const u8,
@@ -30,9 +32,11 @@ const ToDo = union(enum) {
 };
 
 pub const Interpreter = struct {
+    // Helper struct that handles the creation and deletion of objects
     objects: object.Objects,
     // This is a stack of Values preserved while collecting garbage
     preserveValues: *std.ArrayList(Value),
+    // The top-most environment/stack frame
     currentEnv: *Env,
     allocator: std.mem.Allocator,
     stdout: std.io.AnyWriter,
@@ -45,6 +49,7 @@ pub const Interpreter = struct {
 
     argNameMap: std.StringHashMap(std.ArrayList(token.Token)),
 
+    // Initialize the interpreter
     pub fn init(
         allocator: std.mem.Allocator,
         initialEnv: *std.StringHashMap(Value),
@@ -53,6 +58,7 @@ pub const Interpreter = struct {
         stdin: std.io.AnyReader,
         stderr: std.io.AnyWriter,
     ) !Interpreter {
+        // Put the builtin functions in the environment
         try initBuiltins(initialEnv);
         const preserveValues = try allocator.create(std.ArrayList(Value));
         errdefer allocator.destroy(preserveValues);
@@ -78,12 +84,17 @@ pub const Interpreter = struct {
         };
     }
 
+    // When the current file changes,
+    // this method is called with the path to the new file
     pub fn newFile(self: *Interpreter, fileName: []const u8) void {
         self.fileName = fileName;
         self.objects.file = fileName;
         self.currentEnv.file = fileName;
     }
 
+    // Put all builtin functions in the env
+    // Builtin functions are pointers to a method of the interpreter
+    // that takes the argument supplied
     fn initBuiltins(env: *std.StringHashMap(Value)) !void {
         try env.put("print", .{ .builtinFunction = &print });
         try env.put("read", .{ .builtinFunction = &read });
@@ -94,12 +105,17 @@ pub const Interpreter = struct {
         try env.put("trace", .{ .builtinFunction = &trace });
     }
 
+    // Print takes a value, prints it to standard output
+    // and returns Void
     fn print(self: *Interpreter, arg: Value) !Value {
         try value.printValue(arg, self.stdout);
         const composite = try self.objects.makeConstruct("Void", null);
         return composite;
     }
 
+    // This takes the env to trace and isError
+    // depending on isError it prints the trace to stderr or stdout
+    // To get the line information, it opens the file named and counts the lines
     fn printEnvTrace(self: *Interpreter, env: *Env, isError: bool) !void {
         const file = try std.fs.cwd().openFile(env.file, .{ .mode = .read_only });
         defer file.close();
@@ -121,6 +137,9 @@ pub const Interpreter = struct {
         );
     }
 
+    // This traces an env and all its parent Environments
+    // to ensure the correct order, it calls itself recursively first
+    // on its parents
     fn traceEnv(self: *Interpreter, env: *Env, isError: bool) !void {
         if (env.next) |nextEnv| {
             try self.traceEnv(nextEnv, isError);
@@ -128,6 +147,7 @@ pub const Interpreter = struct {
         try self.printEnvTrace(env, isError);
     }
 
+    // Print the stack trace to stdout
     fn trace(self: *Interpreter, arg: Value) !Value {
         try self.traceEnv(self.currentEnv, false);
         try self.stdout.print("\n", .{});
@@ -135,6 +155,8 @@ pub const Interpreter = struct {
         return arg;
     }
 
+    // To print a runtime error, print the trace and the error message
+    // formatted in red to stderr
     fn runtimeError(self: *Interpreter, msg: []const u8) !void {
         try self.stdoutbw.flush();
         try self.stderr.print("\n", .{});
@@ -142,6 +164,9 @@ pub const Interpreter = struct {
         try self.stderr.print("\x1b[31;1m{s}\x1b[m\n", .{msg});
     }
 
+    // This takes a value of type Void to discard and then
+    // gets a line from stdin and converts it to a
+    // linked list of characters
     fn read(self: *Interpreter, arg: Value) !Value {
         _ = arg;
         try self.stdoutbw.flush();
@@ -164,6 +189,7 @@ pub const Interpreter = struct {
         return listVal;
     }
 
+    // This converts a linked list of chars to a zig array of chars
     fn listToString(self: *Interpreter, list: Value) !std.ArrayList(u8) {
         var values = std.ArrayList(u8).init(self.allocator);
         errdefer values.deinit();
@@ -175,6 +201,7 @@ pub const Interpreter = struct {
         return values;
     }
 
+    // This converts an array of chars to a linked list
     fn stringToList(self: *Interpreter, chars: []const u8) !Value {
         var list = try self.objects.makeConstruct("Nil", null);
         for (1..chars.len + 1) |i| {
@@ -189,6 +216,7 @@ pub const Interpreter = struct {
         return list;
     }
 
+    // This converts a given Imp string to an Int
     fn parseInt(self: *Interpreter, arg: Value) !Value {
         const string = try self.listToString(arg);
         defer string.deinit();
@@ -201,6 +229,7 @@ pub const Interpreter = struct {
         return try self.objects.makeConstruct("Some", contents);
     }
 
+    // This converts a given Imp string to a Float
     fn parseFloat(self: *Interpreter, arg: Value) !Value {
         const string = try self.listToString(arg);
         defer string.deinit();
@@ -213,12 +242,14 @@ pub const Interpreter = struct {
         return try self.objects.makeConstruct("Some", contents);
     }
 
+    // This converts an Imp int to an Imp string
     fn showInt(self: *Interpreter, arg: Value) !Value {
         const string = try std.fmt.allocPrint(self.allocator, "{d}", .{arg.int});
         defer self.allocator.free(string);
         return self.stringToList(string);
     }
 
+    // This converts an Imp float to a string
     fn showFloat(self: *Interpreter, arg: Value) !Value {
         var string: []const u8 = undefined;
         if (std.math.floor(arg.float) == arg.float) {
@@ -230,6 +261,7 @@ pub const Interpreter = struct {
         return self.stringToList(string);
     }
 
+    // Loop over all envs and free their content
     fn deinitEnvs(self: *Interpreter) void {
         while (self.currentEnv.next) |next| {
             self.currentEnv.contents.deinit();
@@ -240,6 +272,7 @@ pub const Interpreter = struct {
         self.allocator.destroy(self.currentEnv);
     }
 
+    // Free all objects and created argName strings
     pub fn deinit(self: *Interpreter) void {
         self.preserveValues.deinit();
         self.allocator.destroy(self.preserveValues);
@@ -255,14 +288,17 @@ pub const Interpreter = struct {
         self.argNameMap.deinit();
     }
 
-    fn pushValue(self: *Interpreter, val: Value) !void {
+    // Push the values to preserve them from being freed
+    inline fn pushValue(self: *Interpreter, val: Value) !void {
         try self.preserveValues.append(val);
     }
 
-    fn popValue(self: *Interpreter) void {
+    // Remove the value from the stack
+    inline fn popValue(self: *Interpreter) void {
         _ = self.preserveValues.pop();
     }
 
+    // Push a new Env on top (new stack frame)
     fn pushEnv(
         self: *Interpreter,
         map: *std.StringHashMap(Value),
@@ -282,6 +318,7 @@ pub const Interpreter = struct {
         self.objects.currentEnv = env;
     }
 
+    // Remove the current env
     fn popEnv(self: *Interpreter) void {
         const next = self.currentEnv.next;
         self.allocator.destroy(self.currentEnv);
@@ -289,6 +326,7 @@ pub const Interpreter = struct {
         self.objects.currentEnv = next.?;
     }
 
+    // Search for a value in the Environments
     pub fn lookup(self: *Interpreter, name: []const u8) ?Value {
         var env = self.currentEnv;
         while (!env.contents.contains(name)) {
@@ -301,10 +339,12 @@ pub const Interpreter = struct {
         return env.contents.get(name);
     }
 
+    // Put a value in the Environment
     inline fn set(self: *Interpreter, name: []const u8, val: Value) !void {
         try self.currentEnv.contents.put(name, val);
     }
 
+    // Remove a value from the Environment
     inline fn remove(self: *Interpreter, name: []const u8) void {
         _ = self.currentEnv.contents.remove(name);
     }
@@ -623,6 +663,9 @@ pub const Interpreter = struct {
         }
     }
 
+    // Evaluate a constructor body
+    // The argument names of the constructor are of the from _Object0
+    // This kind of variable name is impossible to be made by the user
     fn evalConstructor(self: *Interpreter, constructor: object.Constructor) !Value {
         if (constructor.numArgs == 0) {
             return self.objects.makeConstruct(constructor.name, null);
@@ -1101,6 +1144,7 @@ pub const Interpreter = struct {
         }
     }
 
+    // Run any given statement (let or type definition)
     pub fn runStatement(self: *Interpreter, statement: Statement) !void {
         switch (statement) {
             .let => |let| {
@@ -1157,6 +1201,7 @@ pub const Interpreter = struct {
         }
     }
 
+    // Run the function named main
     pub fn runMain(self: *Interpreter) !void {
         const voidAst = try self.allocator.create(AST);
         defer voidAst.deinit(self.allocator);

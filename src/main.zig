@@ -42,6 +42,7 @@ pub fn main() !u8 {
         return MainError.WrongUsage;
     }
 
+    // Create error handler
     var errs: errors.Errors = .{
         .stderr = stderr.any(),
         .source = undefined,
@@ -51,13 +52,15 @@ pub fn main() !u8 {
     };
     defer errs.deinit();
 
+    // Get standard input
     const stdin = std.io.getStdIn().reader();
     var stdinBW = std.io.bufferedReader(stdin);
 
+    // Create runner
     var fileRunner = runner.Runner.init(allocator);
-
     defer fileRunner.deinit();
 
+    // Create the algorithm to infer and check types
     var algorithmJ = type_inference.AlgorithmJ.init(allocator, &errs);
     defer algorithmJ.deinit();
 
@@ -65,6 +68,7 @@ pub fn main() !u8 {
     var fileParser = try parser.Parser.init(allocator, &errs, &algorithmJ);
     defer fileParser.deinit();
 
+    // Create the initial environment and the interpreter
     var initialEnv: std.StringHashMap(value.Value) = .init(allocator);
     var interpreter_ = try interpreter.Interpreter.init(
         allocator,
@@ -123,6 +127,7 @@ pub fn main() !u8 {
 
     try fileParser.initBuiltins();
 
+    // Read the standard library
     var stdlib = binDir.openDir("../lib/matura-project/stdlib", .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => {
             try stderr.print("Lib folder is not in the parent folder of the binary", .{});
@@ -175,6 +180,7 @@ pub fn main() !u8 {
 
     const fileName = try std.fs.path.resolve(allocator, &.{consoleArgs[1]});
 
+    // Run the file
     if (try fileRunner.runFile(
         file,
         fileName,
@@ -187,6 +193,7 @@ pub fn main() !u8 {
         return returnCode;
     }
 
+    // Check that a main function exists and has the type Void -> Void
     if (algorithmJ.globalTypes.get("main") == null) {
         try errs.printError("No 'main' defined", .{});
         try errbw.flush();
@@ -236,6 +243,7 @@ pub fn main() !u8 {
         },
     };
 
+    // Run the main function
     interpreter_.runMain() catch |err| switch (err) {
         error.Overflow, error.UnknownIdentifier => {
             try errbw.flush();
