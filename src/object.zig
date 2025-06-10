@@ -64,7 +64,6 @@ pub const Object = struct {
             .closure => "Closure",
             .multiArgClosure => "MultiArgumentClosure",
             .recurse => "Recurse",
-            .construct => "Construct",
         };
     }
 };
@@ -176,7 +175,7 @@ pub const Objects = struct {
     }
 
     // Delete all objects that weren't marked
-    pub fn sweep(self: *Objects) void {
+    pub fn sweep(self: *Objects) !void {
         var o = self.newestObject;
         var prev: ?*Object = null;
         while (o) |obj| {
@@ -197,11 +196,17 @@ pub const Objects = struct {
             }
         }
         var constructIterator = self.constructArrays.iterator();
+        var toFree = std.ArrayList([*]Value).init(self.allocator);
+        defer toFree.deinit();
         while (constructIterator.next()) |constructValues| {
-            if (constructValues.value_ptr.marked) {
-                self.allocator.free(constructValues.value_ptr.slice);
+            if (!constructValues.value_ptr.marked) {
+                try toFree.append(constructValues.key_ptr.*);
             }
             constructValues.value_ptr.marked = false;
+        }
+        for (toFree.items) |freePtr| {
+            self.allocator.free(self.constructArrays.getPtr(freePtr).?.slice);
+            _ = self.constructArrays.remove(freePtr);
         }
     }
 
@@ -209,7 +214,7 @@ pub const Objects = struct {
     fn makeObject(self: *Objects) !*Object {
         if (GCStressTest or self.objCount > self.objCountUntilGC) {
             self.mark();
-            self.sweep();
+            try self.sweep();
             if (self.objCount < self.objCountUntilGC / 4) {
                 self.objCountUntilGC /= 2;
             } else if (self.objCount > self.objCountUntilGC) {
@@ -219,6 +224,7 @@ pub const Objects = struct {
         const object = try self.allocator.create(Object);
         object.next = self.newestObject;
         self.newestObject = object;
+        self.objCount += 1;
         return object;
     }
 
@@ -270,6 +276,7 @@ pub const Objects = struct {
     pub fn makeConstruct(self: *Objects, name: []const u8, values: ?[]Value) !Value {
         if (values) |vals| {
             try self.constructArrays.put(vals.ptr, .{ .slice = vals, .marked = false });
+            self.objCount += vals.len;
         }
         return .{ .construct = .{
             .name = name,

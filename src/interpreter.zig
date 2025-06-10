@@ -865,15 +865,15 @@ pub const Interpreter = struct {
                                 break;
                             }
                         }
-                        i = 0;
-                        while (i < multiClos.argNames.items.len) : (i += 1) {
-                            if (i < endI) {
-                                self.popValue();
-                            }
-                        }
-                        // Pop the function
-                        self.popValue();
                         if (numArgs >= multiClos.argNames.items.len) {
+                            i = 0;
+                            while (i < multiClos.argNames.items.len) : (i += 1) {
+                                if (i < endI) {
+                                    self.popValue();
+                                }
+                            }
+                            // Pop the function
+                            self.popValue();
                             defer copiedEnv.deinit();
                             const location = switch (multiClos.code) {
                                 .ast => |ast| utils.computeBoundaries(ast).start,
@@ -895,8 +895,16 @@ pub const Interpreter = struct {
                             }
                             return .{ .value = result };
                         } else {
-                            try self.pushValue(function);
-                            defer self.popValue();
+                            defer {
+                                i = 0;
+                                while (i < multiClos.argNames.items.len) : (i += 1) {
+                                    if (i < endI) {
+                                        self.popValue();
+                                    }
+                                }
+                                // Pop the function
+                                self.popValue();
+                            }
                             if (multiClos.argNames.items.len - numArgs == 1) {
                                 const closure = try self.objects.makeClosure(
                                     multiClos.argNames.items[0],
