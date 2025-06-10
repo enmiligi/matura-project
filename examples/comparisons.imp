@@ -1,2 +1,3 @@
 let f = lambda x. x
-let main = f == f
+let main = lambda x.
+    print (f == f)

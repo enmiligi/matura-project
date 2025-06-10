@@ -1,6 +1,7 @@
-let main = case Nil of
-    Cons a t =>
-        (case t of
-            Cons b t_ => Cons b (Cons a t_)
-          | Nil => Cons a t)
-  | Nil => Nil
+let main = lambda v.
+    print case [Nil, [1], [2, 3]] of
+        Cons a t =>
+            (case t of
+                Cons b t_ => Cons b (Cons a t_)
+                | Nil => Cons a t)
+        | Nil => Nil
