@@ -54,6 +54,7 @@ pub const Parser = struct {
         };
     }
 
+    // Put a type parsed from tExpr in the env at the name given
     fn initBuiltin(self: *Parser, name: []const u8, tExpr: []const u8) !void {
         try self.newSource(tExpr);
         var region: utils.Region = .{ .start = 0, .end = 0 };
@@ -66,6 +67,7 @@ pub const Parser = struct {
         try self.algorithmJ.globalTypes.put(name, tS);
     }
 
+    // Create and initialize the types of the builtin functions
     pub fn initBuiltins(self: *Parser) !void {
         self.typeVarMap = .init(self.allocator);
         defer {
@@ -85,6 +87,7 @@ pub const Parser = struct {
         try self.initBuiltin("trace", "Void -> Void");
     }
 
+    // Switch the source code of the parser to another file
     pub fn newSource(self: *Parser, source: []const u8) !void {
         self.lexer.newSource(source);
         self.next = try self.lexer.getToken();
@@ -94,16 +97,8 @@ pub const Parser = struct {
         self.allocator.destroy(self.lexer);
     }
 
-    pub fn parseToEnd(self: *Parser) !*AST {
-        const res = try self.parse();
-        if (!(self.peekToken().type == .EOF)) {
-            res.deinit(self.allocator);
-            try self.errs.errorAt(self.peekToken().start, self.peekToken().end, "Unexpected token", .{});
-            return error.UnexpectedToken;
-        }
-        return res;
-    }
-
+    // Parse a constraint and put it into the typeVarMap
+    // constraint ::= Number Identifier
     fn constraint(self: *Parser) !?usize {
         if (self.peekToken().type == .Identifier and std.mem.eql(u8, self.peekToken().lexeme, "Number")) {
             const numberToken = try self.getToken();
@@ -141,6 +136,7 @@ pub const Parser = struct {
         return null;
     }
 
+    // Parse a type with optionally constraints
     pub fn constrainedType(self: *Parser, region: *utils.Region, declaredVars: bool, precedence: u8) !*type_inference.Type {
         var start: usize = 0;
         while (try self.constraint()) |constraintStart| {
@@ -161,6 +157,8 @@ pub const Parser = struct {
         return result;
     }
 
+    // Parse a type without constraints
+    // Arguments given to type have highest precedence, then function types
     pub fn typeExpr(self: *Parser, region: *utils.Region, declaredVars: bool, precedence: u8) !*type_inference.Type {
         var currentType: *type_inference.Type = undefined;
         if (self.typeVar()) |typeVarName| {
@@ -309,7 +307,7 @@ pub const Parser = struct {
         return statements;
     }
 
-    // At the moment, the only statement is let
+    // Parse a let or type statement
     fn statement(self: *Parser) !Statement {
         switch (self.peekToken().type) {
             .Let => {
@@ -334,6 +332,7 @@ pub const Parser = struct {
         }
     }
 
+    // A type variable has a lowercase name
     fn typeVar(self: *Parser) ?token.Token {
         if (self.peekToken().type == .Identifier) {
             if (std.ascii.isLower(self.peekToken().lexeme[0])) {
@@ -345,6 +344,7 @@ pub const Parser = struct {
         return null;
     }
 
+    // A type name starts with an uppercase letter
     fn typeName(self: *Parser) ?token.Token {
         if (self.peekToken().type == .Identifier) {
             if (std.ascii.isUpper(self.peekToken().lexeme[0])) {
@@ -397,6 +397,7 @@ pub const Parser = struct {
         return letStmt;
     }
 
+    // constructor ::= Name typeExpr*
     fn constructor(self: *Parser) !?Statement.Constructor {
         if (self.typeName()) |constructorName| {
             var args = std.ArrayList(*type_inference.Type).init(self.allocator);
@@ -415,6 +416,7 @@ pub const Parser = struct {
         return null;
     }
 
+    // typeStatement ::= type typeName typeVar* = constructor (| constructor)*
     fn typeStatement(self: *Parser) !Statement {
         _ = try self.getToken();
 
@@ -581,6 +583,7 @@ pub const Parser = struct {
         return ast;
     }
 
+    // boolConstant ::= BoolLiteral
     fn boolLiteral(self: *Parser) !*AST {
         const t = try self.getToken();
         const ast = try self.allocator.create(AST);
@@ -591,6 +594,7 @@ pub const Parser = struct {
         return ast;
     }
 
+    // charConstant ::= charLiteral
     fn charLiteral(self: *Parser) !*AST {
         const t = try self.getToken();
         var value = t.lexeme[0];
@@ -626,6 +630,8 @@ pub const Parser = struct {
 
     // Non-terminal prefix "operators"
     // ===============================
+
+    // A string is syntax sugar for a list of chars
     fn stringLiteral(self: *Parser) !*AST {
         const t = try self.getToken();
         var chars = std.ArrayList(*AST).init(self.allocator);
@@ -671,6 +677,7 @@ pub const Parser = struct {
         return stringList;
     }
 
+    // brackets ::= ( expression )
     fn brackets(self: *Parser) !*AST {
         // Must be a left paren
         _ = try self.getToken();
@@ -731,7 +738,7 @@ pub const Parser = struct {
         return letExpr;
     }
 
-    // lambda ::= Lambda Identifier Dot Expr
+    // lambda ::= Lambda Identifier (Colon constrainedType)? Dot Expr
     fn lambda(self: *Parser) !*AST {
         const start = self.peekToken().start;
         _ = try self.getToken();
@@ -777,6 +784,7 @@ pub const Parser = struct {
         return lambdaExpr;
     }
 
+    // if ::= If expression Then expression Else expression
     fn ifExpr(self: *Parser) !*AST {
         const start = (try self.getToken()).start;
 
@@ -803,6 +811,7 @@ pub const Parser = struct {
         return ifAST;
     }
 
+    // A pattern consists of the constructor and variable names for the values
     fn pattern(self: *Parser) !Pattern {
         if (self.peekToken().type == .Identifier) {
             const constructorName = try self.getToken();
@@ -824,6 +833,7 @@ pub const Parser = struct {
         return error.UnexpectedToken;
     }
 
+    // caseExpr ::= Case expression Of pattern DoubleArrow expression (Pipe pattern DoubleArrow expression)*
     fn caseExpr(self: *Parser) !*AST {
         const start = (try self.getToken()).start;
         const value = try self.expression(0);
@@ -862,6 +872,7 @@ pub const Parser = struct {
         return caseAST;
     }
 
+    // prefixOp ::= Operator
     fn prefixOp(self: *Parser) !*AST {
         const t = try self.getToken();
         const prec: usize = switch (t.lexeme[0]) {
@@ -876,6 +887,7 @@ pub const Parser = struct {
         return prefixOpAST;
     }
 
+    // list ::= LeftBracket (expression (Comma expression)* Comma?)? RightBracket
     fn list(self: *Parser) !*AST {
         const start = (try self.getToken()).start;
 
@@ -940,6 +952,7 @@ pub const Parser = struct {
         };
     }
 
+    // operrator ::= Operator
     fn operator(self: *Parser, left: *AST) !*AST {
         const t = try self.getToken();
         const prec: usize = switch (t.lexeme[0]) {
@@ -960,6 +973,7 @@ pub const Parser = struct {
         return astOp;
     }
 
+    // call ::= expression expression
     fn call(self: *Parser, left: *AST) !*AST {
         // A call is left associative, therefore also max precedence
         const expr = try self.expression(std.math.maxInt(Precedence));
@@ -997,6 +1011,7 @@ pub const Parser = struct {
         };
     }
 
+    // Expect a token of a given type
     fn expectToken(self: *Parser, tt: token.TokenType) !token.Token {
         if (self.peekToken().type != tt) {
             try self.errs.errorAt(

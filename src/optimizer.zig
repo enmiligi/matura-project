@@ -3,6 +3,7 @@ const AST = @import("ast.zig").AST;
 const Statement = @import("ast.zig").Statement;
 const token = @import("./token.zig");
 
+// Convert all lists to consecutive calls of Cons
 pub const ConvertList = struct {
     pub fn run(ast: *AST, allocator: std.mem.Allocator) !void {
         switch (ast.*) {
@@ -87,7 +88,10 @@ pub const ConvertList = struct {
     }
 };
 
+// Create a list of bound variables for each closure
+// so not the entire env has to be cloned
 pub const OptimizeClosures = struct {
+    // Search all referenced variables that have not been declared inside
     fn findEnclosed(
         ast: *AST,
         found: *std.ArrayList([]const u8),
@@ -151,6 +155,7 @@ pub const OptimizeClosures = struct {
         }
     }
 
+    // Run the optimization on each contained sub-AST
     pub fn run(ast: *AST, allocator: std.mem.Allocator) !void {
         switch (ast.*) {
             .intConstant, .floatConstant, .boolConstant, .charConstant, .identifier => {},
@@ -197,6 +202,7 @@ pub const OptimizeClosures = struct {
     }
 };
 
+// Convert consecutive lambdas or calls into one object
 pub const OptimizeFullyInstantiatedCalls = struct {
     fn combineCalls(ast: *AST, allocator: std.mem.Allocator) !void {
         errdefer ast.* = .{ .boolConstant = .{
@@ -335,6 +341,7 @@ pub const OptimizeFullyInstantiatedCalls = struct {
     }
 };
 
+// Run all optimizations consecutively on a statement
 pub fn optimizeStatement(statement: *Statement, allocator: std.mem.Allocator) !void {
     switch (statement.*) {
         .let => |let| {
