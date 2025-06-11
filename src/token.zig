@@ -7,6 +7,8 @@ pub const TokenType = enum {
     If,
     Then,
     Else,
+    Or,
+    And,
     // special characters
     Dot,
     Equal,
@@ -71,6 +73,8 @@ pub fn formatTokenType(tt: TokenType) []const u8 {
         .LeftBracket => "'['",
         .RightBracket => "']'",
         .StringLiteral => "a string",
+        .Or => "'or'",
+        .And => "'and'",
     };
     return name;
 }

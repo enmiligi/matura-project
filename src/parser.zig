@@ -957,9 +957,12 @@ pub const Parser = struct {
         const t = try self.getToken();
         const prec: usize = switch (t.lexeme[0]) {
             ';' => 0,
-            '<', '>', '!', '=' => 10,
-            '+', '-' => 20,
-            '*', '/' => 30,
+            // or and and
+            'o' => 20,
+            'a' => 30,
+            '<', '>', '!', '=' => 40,
+            '+', '-' => 50,
+            '*', '/' => 60,
             else => undefined,
         };
         const right = try self.expression(prec);
@@ -986,15 +989,21 @@ pub const Parser = struct {
     // get rule for token in the middle of expression (infix, postfix or mixfix)
     fn getLed(self: *Parser) ?InfixParseRule {
         return switch (self.peekToken().type) {
+            .Or => {
+                return .{ operator, 20 };
+            },
+            .And => {
+                return .{ operator, 30 };
+            },
             .Operator => {
                 if (self.peekToken().lexeme.len == 1 and self.peekToken().lexeme[0] == '!') {
                     return .{ call, std.math.maxInt(Precedence) };
                 }
                 const prec: usize = switch (self.peekToken().lexeme[0]) {
-                    ';' => 5,
-                    '<', '>', '=', '!' => 10,
-                    '+', '-' => 20,
-                    '*', '/' => 30,
+                    ';' => 10,
+                    '<', '>', '=', '!' => 40,
+                    '+', '-' => 50,
+                    '*', '/' => 60,
                     else => undefined,
                 };
                 return .{ operator, prec };

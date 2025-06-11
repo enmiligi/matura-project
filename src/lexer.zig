@@ -18,6 +18,8 @@ const identifierMap =
         .{ "if", .If },
         .{ "then", .Then },
         .{ "else", .Else },
+        .{ "or", .Or },
+        .{ "and", .And },
         .{ "type", .Type },
         .{ "case", .Case },
         .{ "of", .Of },

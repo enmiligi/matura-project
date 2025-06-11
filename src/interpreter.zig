@@ -418,6 +418,22 @@ pub const Interpreter = struct {
         }
     }
 
+    // Two boolean values are combined
+    fn evalBooleanOp(self: *Interpreter, op: token.Token, left: Value, right: Value) !Value {
+        _ = self;
+        switch (op.type) {
+            .Or => {
+                return .{ .bool = left.bool or right.bool };
+            },
+            .And => {
+                return .{ .bool = left.bool and right.bool };
+            },
+            else => {
+                return undefined;
+            },
+        }
+    }
+
     // Two values are compared
     fn evalComp(op: token.Token, left: Value, right: Value) !Value {
         switch (left) {
@@ -1102,6 +1118,10 @@ pub const Interpreter = struct {
                     switch (op.token.lexeme[0]) {
                         '+', '-', '*', '/' => {
                             return self.evalNumberOp(op.token, left, right);
+                        },
+                        // or and and
+                        'o', 'a' => {
+                            return self.evalBooleanOp(op.token, left, right);
                         },
                         '<', '>', '=', '!' => {
                             return evalComp(op.token, left, right);

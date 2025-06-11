@@ -989,10 +989,47 @@ pub const AlgorithmJ = struct {
                 errdefer self.allocator.destroy(t);
                 const leftType = try self.run(op.left);
                 defer leftType.deinit(self.allocator);
+                const rightType = try self.run(op.right);
+                errdefer rightType.deinit(self.allocator);
+                self.unify(leftType, rightType) catch |err| switch (err) {
+                    error.CouldNotUnify => {
+                        try self.errors.typeMismatch(
+                            op.left,
+                            op.right,
+                            leftType,
+                            rightType,
+                            "they are arguments to the same operator",
+                        );
+                        return err;
+                    },
+                    else => {
+                        return err;
+                    },
+                };
                 if (op.token.lexeme[0] == ';') {
-                    const rightType = try self.run(op.right);
                     self.allocator.destroy(t);
                     return rightType;
+                } else if (op.token.lexeme[0] == 'o' or op.token.lexeme[0] == 'a') {
+                    // Or and and are boolean operators
+                    const boolType = try Type.init(self.allocator);
+                    defer boolType.deinit(self.allocator);
+                    boolType.data = .{ .primitive = .Bool };
+                    self.unify(leftType, boolType) catch |err| switch (err) {
+                        error.CouldNotUnify => {
+                            try self.errors.typeComparison(
+                                computeBoundaries(op.left),
+                                leftType,
+                                boolType,
+                                "should be the same as this type",
+                                "it is given as an argument to a boolean operator:",
+                                .{ .start = op.token.start, .end = op.token.end },
+                            );
+                            return err;
+                        },
+                        else => {
+                            return err;
+                        },
+                    };
                 } else if (op.token.lexeme[0] != '=' and op.token.lexeme[0] != '!') {
                     const tV = try Type.init(self.allocator);
                     tV.* = self.newVarT();
@@ -1021,25 +1058,9 @@ pub const AlgorithmJ = struct {
                         },
                     };
                 }
-                const rightType = try self.run(op.right);
-                errdefer rightType.deinit(self.allocator);
-                self.unify(leftType, rightType) catch |err| switch (err) {
-                    error.CouldNotUnify => {
-                        try self.errors.typeMismatch(
-                            op.left,
-                            op.right,
-                            leftType,
-                            rightType,
-                            "they are arguments to the same operator",
-                        );
-                        return err;
-                    },
-                    else => {
-                        return err;
-                    },
-                };
                 switch (op.token.lexeme[0]) {
-                    '+', '-', '*', '/' => {
+                    // 'o' and 'a' are the start of or and and
+                    '+', '-', '*', '/', 'o', 'a' => {
                         self.allocator.destroy(t);
                         return rightType;
                     },
