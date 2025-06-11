@@ -952,7 +952,7 @@ pub const Parser = struct {
         };
     }
 
-    // operrator ::= Operator
+    // operator ::= Operator
     fn operator(self: *Parser, left: *AST) !*AST {
         const t = try self.getToken();
         const prec: usize = switch (t.lexeme[0]) {
@@ -963,6 +963,8 @@ pub const Parser = struct {
             '<', '>', '!', '=' => 40,
             '+', '-' => 50,
             '*', '/' => 60,
+            // Exponentiation associates to the right
+            '^' => 60,
             else => undefined,
         };
         const right = try self.expression(prec);
@@ -1004,6 +1006,7 @@ pub const Parser = struct {
                     '<', '>', '=', '!' => 40,
                     '+', '-' => 50,
                     '*', '/' => 60,
+                    '^' => 70,
                     else => undefined,
                 };
                 return .{ operator, prec };

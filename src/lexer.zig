@@ -104,7 +104,7 @@ pub const Lexer = struct {
                 ':' => .Colon,
                 ',' => .Comma,
                 '|' => .VBar,
-                '+', '-', '*', '/', ';' => .Operator,
+                '+', '-', '*', '/', ';', '^' => .Operator,
                 else => null,
             };
             if (tt) |value| {

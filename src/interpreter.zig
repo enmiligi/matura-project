@@ -403,6 +403,7 @@ pub const Interpreter = struct {
                             '-' => float1 - float2,
                             '*' => float1 * float2,
                             '/' => float1 / float2,
+                            '^' => std.math.pow(f64, float1, float2),
                             else => undefined,
                         };
                         return .{ .float = res };
@@ -1116,7 +1117,7 @@ pub const Interpreter = struct {
                     self.popValue();
                     // Determine whether it is arithmetic or a comparison
                     switch (op.token.lexeme[0]) {
-                        '+', '-', '*', '/' => {
+                        '+', '-', '*', '/', '^' => {
                             return self.evalNumberOp(op.token, left, right);
                         },
                         // or and and

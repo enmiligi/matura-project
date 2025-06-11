@@ -1030,6 +1030,26 @@ pub const AlgorithmJ = struct {
                             return err;
                         },
                     };
+                } else if (op.token.lexeme[0] == '^') {
+                    const floatType = try Type.init(self.allocator);
+                    defer floatType.deinit(self.allocator);
+                    floatType.data = .{ .primitive = .Float };
+                    self.unify(leftType, floatType) catch |err| switch (err) {
+                        error.CouldNotUnify => {
+                            try self.errors.typeComparison(
+                                computeBoundaries(op.left),
+                                leftType,
+                                floatType,
+                                "should be the same as this type",
+                                "it is given as an argument to exponentiation:",
+                                .{ .start = op.token.start, .end = op.token.end },
+                            );
+                            return err;
+                        },
+                        else => {
+                            return err;
+                        },
+                    };
                 } else if (op.token.lexeme[0] != '=' and op.token.lexeme[0] != '!') {
                     const tV = try Type.init(self.allocator);
                     tV.* = self.newVarT();
@@ -1060,7 +1080,7 @@ pub const AlgorithmJ = struct {
                 }
                 switch (op.token.lexeme[0]) {
                     // 'o' and 'a' are the start of or and and
-                    '+', '-', '*', '/', 'o', 'a' => {
+                    '+', '-', '*', '/', 'o', 'a', '^' => {
                         self.allocator.destroy(t);
                         return rightType;
                     },
