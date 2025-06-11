@@ -199,10 +199,14 @@ pub const Lexer = struct {
     // the current line is not indented
     fn skipWhitespace(self: *Lexer) ?token.Token {
         var newLineOccurred = false;
-        while (!self.isAtEnd() and std.ascii.isWhitespace(self.getChar())) {
+        var inComment = false;
+        while (!self.isAtEnd() and (std.ascii.isWhitespace(self.getChar()) or self.getChar() == '#' or inComment)) {
             if (self.getChar() == '\n') {
                 newLineOccurred = true;
+                inComment = false;
                 self.tokenStart = self.location;
+            } else if (self.getChar() == '#') {
+                inComment = true;
             }
             self.location += 1;
         }
