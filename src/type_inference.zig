@@ -991,21 +991,23 @@ pub const AlgorithmJ = struct {
                 defer leftType.deinit(self.allocator);
                 const rightType = try self.run(op.right);
                 errdefer rightType.deinit(self.allocator);
-                self.unify(leftType, rightType) catch |err| switch (err) {
-                    error.CouldNotUnify => {
-                        try self.errors.typeMismatch(
-                            op.left,
-                            op.right,
-                            leftType,
-                            rightType,
-                            "they are arguments to the same operator",
-                        );
-                        return err;
-                    },
-                    else => {
-                        return err;
-                    },
-                };
+                if (op.token.lexeme[0] != ';') {
+                    self.unify(leftType, rightType) catch |err| switch (err) {
+                        error.CouldNotUnify => {
+                            try self.errors.typeMismatch(
+                                op.left,
+                                op.right,
+                                leftType,
+                                rightType,
+                                "they are arguments to the same operator",
+                            );
+                            return err;
+                        },
+                        else => {
+                            return err;
+                        },
+                    };
+                }
                 if (op.token.lexeme[0] == ';') {
                     self.allocator.destroy(t);
                     return rightType;
