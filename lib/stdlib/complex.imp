@@ -1,0 +1,21 @@
+type Complex = Complex Float Float
+
+let addComplex =
+   lambda x. lambda y.
+       case x of
+           Complex xr xi =>
+               case y of
+                   Complex yr yi =>
+                       Complex (xr + yr) (xi + yi)
+
+let multComplex =
+   lambda x. lambda y.
+       case x of
+           Complex xr xi =>
+               case y of
+                   Complex yr yi =>
+                       Complex (xr * yr - xi * yi) (xr * yi + xi * yr)
+
+let magnitude = lambda x.
+   case x of
+       Complex xr xi => (xr^2.0 + xi^2.0) ^ 0.5

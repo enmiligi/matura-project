@@ -1,0 +1,37 @@
+let iterate =
+    lambda currentRe. lambda currentIm. lambda cRe. lambda cIm. lambda n.
+        if n == 0 then
+            True
+        else
+            let nextRe = currentRe*currentRe - currentIm*currentIm + cRe in
+                let nextIm = 2.0*currentRe*currentIm + cIm in
+                    if nextRe * nextRe + nextIm * nextIm > 4.0 then
+                        False
+                    else
+                        iterate nextRe nextIm cRe cIm (n - 1)
+
+let printPoint = lambda re. lambda im.
+    if iterate 0.0 0.0 re im 100 then
+        print '#'
+    else
+        print ' '
+
+let printRow =
+    lambda im. lambda reStart. lambda reEnd. lambda stride.
+        printPoint reStart im;
+        if reStart + stride <= reEnd then
+            printRow im (reStart + stride) reEnd stride
+        else
+            Void
+
+let printMandelbrot =
+    lambda imStart. lambda imEnd. lambda imStride.
+        printRow imStart (-2.0) 2.0 0.001;
+        print "\n";
+        if imStart + imStride <= imEnd then
+            printMandelbrot (imStart + imStride) imEnd imStride
+        else
+            Void
+
+let main = lambda v.
+    printMandelbrot (-2.0) 2.0 0.001
