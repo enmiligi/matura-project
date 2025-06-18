@@ -48,7 +48,7 @@ pub const Lexer = struct {
         }
         self.tokenStart = self.location;
         if (self.isAtEnd()) return self.makeToken(.EOF);
-        const c = self.getChar();
+        const c = self.getChar().?;
         // Possible Tokens:
         // identifier and keywords: start with alphanumeric
         // numbers: start with digit
@@ -61,11 +61,11 @@ pub const Lexer = struct {
             if (c == '\'') {
                 self.location += 1;
                 self.tokenStart += 1;
-                if (self.getChar() == '\\') {
+                if (self.getChar() != null and self.getChar().? == '\\') {
                     self.location += 1;
                 }
                 self.location += 1;
-                if (self.location >= self.source.len or self.getChar() != '\'') {
+                if (self.getChar() == null or self.getChar().? != '\'') {
                     try self.errs.errorAt(self.location, self.location, "There should be a ' to end the char.", .{});
                     return error.InvalidChar;
                 }
@@ -75,22 +75,26 @@ pub const Lexer = struct {
             }
             if (c == '\"') {
                 self.location += 1;
-                while (self.location < self.source.len and self.getChar() != '"') {
-                    if (self.getChar() == '\\') {
+                while (self.getChar() != null and self.getChar().? != '"') {
+                    if (self.getChar() != null and self.getChar().? == '\\') {
                         self.location += 1;
                     }
                     self.location += 1;
                 }
-                if (self.location == self.source.len) {
+                if (self.isAtEnd()) {
                     try self.errs.errorAt(self.location, self.location, "There should be a \" to end the string.", .{});
                     return error.InvalidChar;
                 }
                 self.location += 1;
                 return self.makeToken(.StringLiteral);
             }
-            if (c == '-' and self.source[self.location + 1] == '>') {
+            if (c == '-' and self.peekChar() != null and self.peekChar() == '>') {
                 self.location += 2;
                 return self.makeToken(.Arrow);
+            }
+            if (c == '-' and self.peekChar() != null and std.ascii.isDigit(self.peekChar().?)) {
+                self.location += 1;
+                return self.numberLiteral();
             }
             if (c == '=' or c == '!' or c == '<' or c == '>') {
                 return self.doubleOperator();
@@ -171,7 +175,7 @@ pub const Lexer = struct {
 
     // identifier ::= alpha (alnum|_)*
     fn identifier(self: *Lexer) token.Token {
-        while (self.location != self.source.len and (std.ascii.isAlphanumeric(self.getChar()) or self.getChar() == '_')) {
+        while (self.getChar() != null and (std.ascii.isAlphanumeric(self.getChar().?) or self.getChar().? == '_')) {
             self.location += 1;
         }
         const tt = identifierMap.get(self.getTokenString()) orelse .Identifier;
@@ -181,13 +185,13 @@ pub const Lexer = struct {
     // int ::= digit+
     // float ::= digit+ '.' digit*
     fn numberLiteral(self: *Lexer) token.Token {
-        while (std.ascii.isDigit(self.getChar())) {
+        while (!self.isAtEnd() and std.ascii.isDigit(self.getChar().?)) {
             self.location += 1;
         }
         var tt = token.TokenType.IntLiteral;
-        if (self.getChar() == '.') {
+        if (!self.isAtEnd() and self.getChar() == '.') {
             self.location += 1;
-            while (std.ascii.isDigit(self.getChar())) {
+            while (!self.isAtEnd() and std.ascii.isDigit(self.getChar().?)) {
                 self.location += 1;
             }
             tt = token.TokenType.FloatLiteral;
@@ -200,7 +204,7 @@ pub const Lexer = struct {
     fn skipWhitespace(self: *Lexer) ?token.Token {
         var newLineOccurred = false;
         var inComment = false;
-        while (!self.isAtEnd() and (std.ascii.isWhitespace(self.getChar()) or self.getChar() == '#' or inComment)) {
+        while (!self.isAtEnd() and (std.ascii.isWhitespace(self.getChar().?) or self.getChar().? == '#' or inComment)) {
             if (self.getChar() == '\n') {
                 newLineOccurred = true;
                 inComment = false;
@@ -219,8 +223,21 @@ pub const Lexer = struct {
     }
 
     // Get the current character
-    inline fn getChar(self: *Lexer) u8 {
-        return self.source[self.location];
+    inline fn getChar(self: *Lexer) ?u8 {
+        if (self.location < self.source.len) {
+            return self.source[self.location];
+        } else {
+            return null;
+        }
+    }
+
+    // Get the next character
+    inline fn peekChar(self: *Lexer) ?u8 {
+        if (self.location + 1 < self.source.len) {
+            return self.source[self.location + 1];
+        } else {
+            return null;
+        }
     }
 
     // Get the current token lexeme

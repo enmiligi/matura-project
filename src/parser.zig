@@ -538,7 +538,7 @@ pub const Parser = struct {
     // main loop as defined by Vaughan R. Pratt in
     // "Top Down Operator Precedence"
     // rbp is right binding power
-    fn expression(self: *Parser, rbp: Precedence) !*AST {
+    pub fn expression(self: *Parser, rbp: Precedence) !*AST {
         // nud stands for null denotation
         const nud = self.getNud();
         const n = nud orelse {
