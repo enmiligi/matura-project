@@ -1,0 +1,283 @@
+pub const c = @cImport(@cInclude("llvm-c/Core.h"));
+const AST = @import("ast.zig").AST;
+const std = @import("std");
+
+pub const Compiler = struct {
+    context: c.LLVMContextRef,
+    module: c.LLVMModuleRef,
+    builder: c.LLVMBuilderRef,
+    function: c.LLVMValueRef,
+    powFunction: c.LLVMValueRef,
+    powType: c.LLVMTypeRef,
+    idToValue: std.StringHashMap(c.LLVMValueRef),
+
+    pub fn compileExpr(self: *Compiler, ast: *AST) !c.LLVMValueRef {
+        switch (ast.*) {
+            .boolConstant => |b| {
+                return c.LLVMConstInt(
+                    c.LLVMInt1TypeInContext(self.context),
+                    if (b.value) 1 else 0,
+                    0,
+                );
+            },
+            .intConstant => |i| {
+                return c.LLVMConstInt(
+                    c.LLVMInt64TypeInContext(self.context),
+                    @bitCast(i.value),
+                    0,
+                );
+            },
+            .floatConstant => |f| {
+                return c.LLVMConstReal(
+                    c.LLVMDoubleTypeInContext(self.context),
+                    f.value,
+                );
+            },
+            .charConstant => |char| {
+                return c.LLVMConstInt(c.LLVMInt8Type(), char.value, 0);
+            },
+            .operator => |op| {
+                const left = try self.compileExpr(op.left);
+                const right = try self.compileExpr(op.right);
+                var innerMost = op.argType;
+                var foundInner = true;
+                while (foundInner) {
+                    switch (innerMost.?.data) {
+                        .typeVar => |tV| {
+                            if (tV.subst) |subst| {
+                                innerMost = subst;
+                                foundInner = true;
+                            }
+                            foundInner = false;
+                        },
+                        .number => |number| {
+                            innerMost = number.variable;
+                            foundInner = true;
+                        },
+                        else => {
+                            foundInner = false;
+                        },
+                    }
+                }
+                var isInt = false;
+                var isFloat = false;
+                var isChar = false;
+                var isBool = false;
+                switch (innerMost.?.data) {
+                    .primitive => |prim| {
+                        switch (prim) {
+                            .Int => {
+                                isInt = true;
+                            },
+                            .Float => {
+                                isFloat = true;
+                            },
+                            .Char => {
+                                isChar = true;
+                            },
+                            .Bool => {
+                                isBool = true;
+                            },
+                        }
+                    },
+                    else => {},
+                }
+                switch (op.token.lexeme[0]) {
+                    '^' => {
+                        var args = [2]c.LLVMValueRef{ left, right };
+                        return c.LLVMBuildCall2(self.builder, self.powType, self.powFunction, &args, 2, "exp");
+                    },
+                    '+' => {
+                        if (isInt) {
+                            return c.LLVMBuildAdd(self.builder, left, right, "add");
+                        } else if (isFloat) {
+                            return c.LLVMBuildFAdd(self.builder, left, right, "add");
+                        }
+                        unreachable;
+                    },
+                    '-' => {
+                        if (isInt) {
+                            return c.LLVMBuildSub(self.builder, left, right, "sub");
+                        } else if (isFloat) {
+                            return c.LLVMBuildFSub(self.builder, left, right, "sub");
+                        }
+                        unreachable;
+                    },
+                    '*' => {
+                        if (isInt) {
+                            return c.LLVMBuildMul(self.builder, left, right, "mul");
+                        } else if (isFloat) {
+                            return c.LLVMBuildFMul(self.builder, left, right, "mul");
+                        }
+                        unreachable;
+                    },
+                    '/' => {
+                        if (isInt) {
+                            return c.LLVMBuildSDiv(self.builder, left, right, "div");
+                        } else if (isFloat) {
+                            return c.LLVMBuildFDiv(self.builder, left, right, "div");
+                        }
+                        unreachable;
+                    },
+                    '<' => {
+                        if (op.token.lexeme.len != 1) {
+                            if (isInt) {
+                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSLE, left, right, "lt");
+                            } else if (isFloat) {
+                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOLE, left, right, "lt");
+                            }
+                        } else {
+                            if (isInt) {
+                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSLT, left, right, "lt");
+                            } else if (isFloat) {
+                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOLT, left, right, "lt");
+                            }
+                        }
+                        unreachable;
+                    },
+                    '>' => {
+                        if (op.token.lexeme.len != 1) {
+                            if (isInt) {
+                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSGE, left, right, "lt");
+                            } else if (isFloat) {
+                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOGE, left, right, "lt");
+                            }
+                        } else {
+                            if (isInt) {
+                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSGT, left, right, "lt");
+                            } else if (isFloat) {
+                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOGT, left, right, "lt");
+                            }
+                        }
+                        unreachable;
+                    },
+                    '=' => {
+                        if (isInt or isChar or isBool) {
+                            return c.LLVMBuildICmp(self.builder, c.LLVMIntEQ, left, right, "lt");
+                        } else if (isFloat) {
+                            return c.LLVMBuildFCmp(self.builder, c.LLVMRealOEQ, left, right, "lt");
+                        }
+                        unreachable;
+                    },
+                    '!' => {
+                        if (isInt or isChar or isBool) {
+                            return c.LLVMBuildICmp(self.builder, c.LLVMIntNE, left, right, "lt");
+                        } else if (isFloat) {
+                            return c.LLVMBuildFCmp(self.builder, c.LLVMRealUNE, left, right, "lt");
+                        }
+                        unreachable;
+                    },
+                    'a' => {
+                        return c.LLVMBuildAnd(self.builder, left, right, "and");
+                    },
+                    'o' => {
+                        return c.LLVMBuildOr(self.builder, left, right, "or");
+                    },
+                    ';' => {
+                        return right;
+                    },
+                    else => {
+                        return null;
+                    },
+                }
+            },
+            .prefixOp => |op| {
+                var innerMost = op.argType;
+                var foundInner = true;
+                while (foundInner) {
+                    switch (innerMost.?.data) {
+                        .typeVar => |tV| {
+                            if (tV.subst) |subst| {
+                                innerMost = subst;
+                                foundInner = true;
+                            }
+                            foundInner = false;
+                        },
+                        .number => |number| {
+                            innerMost = number.variable;
+                            foundInner = true;
+                        },
+                        else => {
+                            foundInner = false;
+                        },
+                    }
+                }
+                var isInt = false;
+                var isFloat = false;
+                switch (innerMost.?.data) {
+                    .primitive => |prim| {
+                        switch (prim) {
+                            .Int => {
+                                isInt = true;
+                            },
+                            .Float => {
+                                isFloat = true;
+                            },
+                            else => {},
+                        }
+                    },
+                    else => {},
+                }
+                const arg = try self.compileExpr(op.expr);
+                switch (op.token.lexeme[0]) {
+                    '!' => {
+                        return c.LLVMBuildNot(self.builder, arg, "not");
+                    },
+                    '-' => {
+                        if (isInt) {
+                            return c.LLVMBuildNeg(self.builder, arg, "negate");
+                        } else if (isFloat) {
+                            return c.LLVMBuildFNeg(self.builder, arg, "negate");
+                        }
+                        unreachable;
+                    },
+                    else => {
+                        unreachable;
+                    },
+                }
+            },
+            .let => |let| {
+                const value = try self.compileExpr(let.be);
+                try self.idToValue.put(let.name.lexeme, value);
+                defer _ = self.idToValue.remove(let.name.lexeme);
+                return self.compileExpr(let.in);
+            },
+            .identifier => |id| {
+                return self.idToValue.get(id.token.lexeme).?;
+            },
+            else => {
+                return null;
+            },
+        }
+    }
+
+    pub fn init(allocator: std.mem.Allocator) Compiler {
+        const context = c.LLVMContextCreate();
+        const module = c.LLVMModuleCreateWithNameInContext("Imp", context);
+        var topLevelArgs = [0]c.LLVMTypeRef{};
+        const topLevelType = c.LLVMFunctionType(c.LLVMVoidType(), &topLevelArgs, 0, 0);
+        const topLevel = c.LLVMAddFunction(module, "topLevel", topLevelType);
+        const topLevelBlock = c.LLVMAppendBasicBlock(topLevel, "entry");
+        const builder = c.LLVMCreateBuilderInContext(context);
+        c.LLVMPositionBuilderAtEnd(builder, topLevelBlock);
+        var param_types = [2]c.LLVMTypeRef{ c.LLVMDoubleType(), c.LLVMDoubleType() };
+        const fn_type = c.LLVMFunctionType(c.LLVMDoubleType(), &param_types, 1, 0);
+        const pow_intrinsic = c.LLVMAddFunction(module, "llvm.pow.f64", fn_type);
+        return .{
+            .context = context,
+            .module = module,
+            .builder = builder,
+            .function = topLevel,
+            .powFunction = pow_intrinsic,
+            .powType = fn_type,
+            .idToValue = .init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *Compiler) void {
+        c.LLVMDisposeBuilder(self.builder);
+        c.LLVMDisposeModule(self.module);
+        c.LLVMContextDispose(self.context);
+        self.idToValue.deinit();
+    }
+};

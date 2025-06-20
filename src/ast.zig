@@ -89,10 +89,12 @@ pub const AST = union(enum) {
         token: token.Token,
         left: *AST,
         right: *AST,
+        argType: ?*Type,
     },
     prefixOp: struct {
         token: token.Token,
         expr: *AST,
+        argType: ?*Type,
     },
     case: struct {
         start: usize,
@@ -144,6 +146,9 @@ pub const AST = union(enum) {
             .operator => |op| {
                 op.left.deinit(allocator);
                 op.right.deinit(allocator);
+                if (op.argType) |argType| {
+                    argType.deinit(allocator);
+                }
             },
             .ifExpr => |ifExpr| {
                 ifExpr.predicate.deinit(allocator);
@@ -152,6 +157,9 @@ pub const AST = union(enum) {
             },
             .prefixOp => |prefixOp| {
                 prefixOp.expr.deinit(allocator);
+                if (prefixOp.argType) |argType| {
+                    argType.deinit(allocator);
+                }
             },
             .case => |case| {
                 case.value.deinit(allocator);

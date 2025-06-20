@@ -10,6 +10,7 @@ pub const value = @import("./value.zig");
 pub const errors = @import("./errors.zig");
 pub const optimizer = @import("./optimizer.zig");
 pub const runner = @import("./runner.zig");
+pub const compiler = @import("compiler.zig");
 
 const MainError = error{
     WrongUsage,
@@ -79,6 +80,21 @@ pub fn main() !u8 {
         stderr.any(),
     );
     defer interpreter_.deinit();
+
+    var compiler_ = compiler.Compiler.init(allocator);
+    defer compiler_.deinit();
+
+    try fileParser.newSource("(- 3) == -3 and 'a' != 'a'");
+    const int = try fileParser.expression(0);
+    defer int.deinit(allocator);
+
+    const tOfInt = try algorithmJ.run(int);
+    defer tOfInt.deinit(allocator);
+
+    const ret = try compiler_.compileExpr(int);
+
+    compiler.c.LLVMDumpValue(compiler_.function);
+    compiler.c.LLVMDumpValue(ret);
 
     // Read builtin types
     const binDirName = std.fs.path.dirname(consoleArgs[0]) orelse ".";

@@ -883,7 +883,11 @@ pub const Parser = struct {
         const expr = try self.expression(prec);
         errdefer expr.deinit(self.allocator);
         const prefixOpAST = try self.allocator.create(AST);
-        prefixOpAST.* = .{ .prefixOp = .{ .token = t, .expr = expr } };
+        prefixOpAST.* = .{ .prefixOp = .{
+            .token = t,
+            .expr = expr,
+            .argType = null,
+        } };
         return prefixOpAST;
     }
 
@@ -974,6 +978,7 @@ pub const Parser = struct {
             .token = t,
             .left = left,
             .right = right,
+            .argType = null,
         } };
         return astOp;
     }

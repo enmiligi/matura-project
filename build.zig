@@ -33,7 +33,9 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
-    //exe.linkLibC();
+    exe.linkLibC();
+    exe.addLibraryPath(.{ .cwd_relative = "/usr/lib64/llvm18/lib/" });
+    exe.linkSystemLibrary("LLVM");
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

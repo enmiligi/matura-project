@@ -924,7 +924,7 @@ pub const AlgorithmJ = struct {
     }
 
     // The main algorithm as described in the paper
-    fn run(self: *AlgorithmJ, ast: *AST) !*Type {
+    pub fn run(self: *AlgorithmJ, ast: *AST) !*Type {
         const t = try Type.init(self.allocator);
         switch (ast.*) {
             .identifier => |id| {
@@ -956,7 +956,7 @@ pub const AlgorithmJ = struct {
             .charConstant => {
                 t.data = .{ .primitive = .Char };
             },
-            .prefixOp => |prefixOp| {
+            .prefixOp => |*prefixOp| {
                 const char = prefixOp.token.lexeme[0];
                 if (char == '-') {
                     const tV = try Type.init(self.allocator);
@@ -984,13 +984,17 @@ pub const AlgorithmJ = struct {
                         return err;
                     },
                 };
+                prefixOp.argType = t;
+                t.rc += 1;
             },
-            .operator => |op| {
+            .operator => |*op| {
                 errdefer self.allocator.destroy(t);
                 const leftType = try self.run(op.left);
                 defer leftType.deinit(self.allocator);
                 const rightType = try self.run(op.right);
                 errdefer rightType.deinit(self.allocator);
+                op.argType = rightType;
+                rightType.rc += 1;
                 if (op.token.lexeme[0] != ';') {
                     self.unify(leftType, rightType) catch |err| switch (err) {
                         error.CouldNotUnify => {
