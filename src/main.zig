@@ -84,17 +84,24 @@ pub fn main() !u8 {
     var compiler_ = compiler.Compiler.init(allocator);
     defer compiler_.deinit();
 
-    try fileParser.newSource("(- 3) == -3 and 'a' != 'a'");
-    const int = try fileParser.expression(0);
-    defer int.deinit(allocator);
+    try fileParser.newSource("let a = lambda x. lambda y. lambda z. lambda w. x + y + z + w + 1");
+    var statements = try fileParser.file();
+    defer {
+        for (statements.items) |*statement| {
+            statement.deinit(allocator);
+        }
+        statements.deinit();
+    }
+    const expr = statements.items[0].let.be;
 
-    const tOfInt = try algorithmJ.run(int);
-    defer tOfInt.deinit(allocator);
+    const tOfExpr = try algorithmJ.run(expr);
+    defer tOfExpr.deinit(allocator);
 
-    const ret = try compiler_.compileExpr(int);
+    try optimizer.optimizeStatement(&statements.items[0], allocator);
 
-    compiler.c.LLVMDumpValue(compiler_.function);
-    compiler.c.LLVMDumpValue(ret);
+    _ = try compiler_.compileExpr(expr);
+
+    compiler.c.LLVMDumpModule(compiler_.module);
 
     // Read builtin types
     const binDirName = std.fs.path.dirname(consoleArgs[0]) orelse ".";
@@ -223,7 +230,10 @@ pub fn main() !u8 {
         return err;
     };
     vType.rc += 1;
-    fType.data = .{ .function = .{ .from = vType, .to = vType } };
+    fType.data = .{ .function = .{
+        .from = vType,
+        .to = vType,
+    } };
     defer fType.deinit(allocator);
 
     var mainType: *type_inference.Type = undefined;

@@ -3,6 +3,7 @@ const token = @import("./token.zig");
 const Type = @import("./type_inference.zig").Type;
 const type_inference = @import("./type_inference.zig");
 const Region = @import("./utils.zig").Region;
+const LLVMTypeRef = @import("./compiler.zig").c.LLVMTypeRef;
 
 pub const TypeAnnotation = struct {
     type: *Type,
@@ -41,6 +42,8 @@ pub const AST = union(enum) {
         argType: ?TypeAnnotation,
         expr: *AST,
         encloses: ?std.ArrayList([]const u8) = null,
+        enclosesTypes: ?std.ArrayList(*Type) = null,
+        type: ?*Type,
     },
     // The lambdaMult ast node combines consecutive lambdas into one object
     // in order to be able to more easily optimize function calls
@@ -84,6 +87,7 @@ pub const AST = union(enum) {
     },
     identifier: struct {
         token: token.Token,
+        idType: ?*Type = null,
     },
     operator: struct {
         token: token.Token,
@@ -123,8 +127,17 @@ pub const AST = union(enum) {
                 if (lambda.encloses) |encloses| {
                     encloses.deinit();
                 }
+                if (lambda.enclosesTypes) |types| {
+                    for (types.items) |t| {
+                        t.deinit(allocator);
+                    }
+                    types.deinit();
+                }
                 if (lambda.argType) |argType| {
                     argType.type.deinit(allocator);
+                }
+                if (lambda.type) |t| {
+                    t.deinit(allocator);
                 }
             },
             .lambdaMult => |lambdaMult| {
@@ -177,6 +190,11 @@ pub const AST = union(enum) {
                     value.deinit(allocator);
                 }
                 list.values.deinit();
+            },
+            .identifier => |id| {
+                if (id.idType) |t| {
+                    t.deinit(allocator);
+                }
             },
             else => {},
         }

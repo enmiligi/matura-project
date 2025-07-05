@@ -779,6 +779,7 @@ pub const Parser = struct {
             .expr = expr,
             .encloses = null,
             .argType = argType,
+            .type = null,
         } };
 
         return lambdaExpr;

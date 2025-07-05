@@ -2,6 +2,7 @@ const std = @import("std");
 const AST = @import("ast.zig").AST;
 const Statement = @import("ast.zig").Statement;
 const token = @import("./token.zig");
+const Type = @import("./type_inference.zig").Type;
 
 // Convert all lists to consecutive calls of Cons
 pub const ConvertList = struct {
@@ -95,6 +96,7 @@ pub const OptimizeClosures = struct {
     fn findEnclosed(
         ast: *AST,
         found: *std.ArrayList([]const u8),
+        foundTypes: *std.ArrayList(*Type),
         exclude: *std.StringHashMap(void),
     ) !void {
         switch (ast.*) {
@@ -102,48 +104,50 @@ pub const OptimizeClosures = struct {
             .identifier => |id| {
                 if (!exclude.contains(id.token.lexeme)) {
                     try found.append(id.token.lexeme);
+                    id.idType.?.rc += 1;
+                    try foundTypes.append(id.idType.?);
                 }
             },
             .let => |let| {
                 const alreadyPresent = exclude.contains(let.name.lexeme);
                 try exclude.put(let.name.lexeme, undefined);
-                try findEnclosed(let.in, found, exclude);
-                try findEnclosed(let.be, found, exclude);
+                try findEnclosed(let.in, found, foundTypes, exclude);
+                try findEnclosed(let.be, found, foundTypes, exclude);
                 if (!alreadyPresent) {
                     _ = exclude.remove(let.name.lexeme);
                 }
             },
             .ifExpr => |ifExpr| {
-                try findEnclosed(ifExpr.predicate, found, exclude);
-                try findEnclosed(ifExpr.thenExpr, found, exclude);
-                try findEnclosed(ifExpr.elseExpr, found, exclude);
+                try findEnclosed(ifExpr.predicate, found, foundTypes, exclude);
+                try findEnclosed(ifExpr.thenExpr, found, foundTypes, exclude);
+                try findEnclosed(ifExpr.elseExpr, found, foundTypes, exclude);
             },
             .call => |call| {
-                try findEnclosed(call.function, found, exclude);
-                try findEnclosed(call.arg, found, exclude);
+                try findEnclosed(call.function, found, foundTypes, exclude);
+                try findEnclosed(call.arg, found, foundTypes, exclude);
             },
             .operator => |op| {
-                try findEnclosed(op.left, found, exclude);
-                try findEnclosed(op.right, found, exclude);
+                try findEnclosed(op.left, found, foundTypes, exclude);
+                try findEnclosed(op.right, found, foundTypes, exclude);
             },
             .prefixOp => |prefixOp| {
-                try findEnclosed(prefixOp.expr, found, exclude);
+                try findEnclosed(prefixOp.expr, found, foundTypes, exclude);
             },
             .lambda => |lambda| {
                 const alreadyPresent = exclude.contains(lambda.argname.lexeme);
                 try exclude.put(lambda.argname.lexeme, undefined);
-                try findEnclosed(lambda.expr, found, exclude);
+                try findEnclosed(lambda.expr, found, foundTypes, exclude);
                 if (!alreadyPresent) {
                     _ = exclude.remove(lambda.argname.lexeme);
                 }
             },
             .case => |case| {
-                try findEnclosed(case.value, found, exclude);
+                try findEnclosed(case.value, found, foundTypes, exclude);
                 for (case.patterns.items, case.bodies.items) |pattern, body| {
                     for (pattern.values.items) |value| {
                         try exclude.put(value.lexeme, undefined);
                     }
-                    try findEnclosed(body, found, exclude);
+                    try findEnclosed(body, found, foundTypes, exclude);
                     for (pattern.values.items) |value| {
                         _ = exclude.remove(value.lexeme);
                     }
@@ -179,11 +183,14 @@ pub const OptimizeClosures = struct {
             .lambda => |*lambda| {
                 var found = std.ArrayList([]const u8).init(allocator);
                 errdefer found.deinit();
+                var foundTypes = std.ArrayList(*Type).init(allocator);
+                errdefer foundTypes.deinit();
                 var exclude = std.StringHashMap(void).init(allocator);
                 defer exclude.deinit();
                 try exclude.put(lambda.argname.lexeme, undefined);
-                try findEnclosed(ast, &found, &exclude);
+                try findEnclosed(ast, &found, &foundTypes, &exclude);
                 lambda.encloses = found;
+                lambda.enclosesTypes = foundTypes;
                 try run(lambda.expr, allocator);
             },
             .prefixOp => |prefixOp| {
@@ -347,7 +354,7 @@ pub fn optimizeStatement(statement: *Statement, allocator: std.mem.Allocator) !v
         .let => |let| {
             try ConvertList.run(let.be, allocator);
             try OptimizeClosures.run(let.be, allocator);
-            try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
+            //try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
         },
         .type => {},
     }

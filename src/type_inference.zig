@@ -925,20 +925,22 @@ pub const AlgorithmJ = struct {
 
     // The main algorithm as described in the paper
     pub fn run(self: *AlgorithmJ, ast: *AST) !*Type {
-        const t = try Type.init(self.allocator);
+        var t = try Type.init(self.allocator);
         switch (ast.*) {
-            .identifier => |id| {
+            .identifier => |*id| {
                 self.allocator.destroy(t);
                 if (self.globalTypes.get(id.token.lexeme)) |typeOfIdScheme| {
                     switch (typeOfIdScheme.*) {
                         .type => |typeOfId| {
                             typeOfId.rc += 1;
-                            return typeOfId;
+                            t = typeOfId;
                         },
                         .forall => |*forall| {
-                            return self.instantiate(forall);
+                            t = try self.instantiate(forall);
                         },
                     }
+                    t.rc += 1;
+                    id.idType = t;
                 } else {
                     try self.errors.errorAt(id.token.start, id.token.end, "Unknown identifier", .{});
                     return error.UnknownIdentifier;
@@ -1191,7 +1193,7 @@ pub const AlgorithmJ = struct {
                     },
                 };
             },
-            .lambda => |lambda| {
+            .lambda => |*lambda| {
                 errdefer self.allocator.destroy(t);
                 const newTypeVar = try Type.init(self.allocator);
                 newTypeVar.* = self.newVarT();
@@ -1247,6 +1249,8 @@ pub const AlgorithmJ = struct {
                         },
                     };
                 }
+                lambda.type = t;
+                t.rc += 1;
             },
             .let => |let| {
                 self.allocator.destroy(t);
