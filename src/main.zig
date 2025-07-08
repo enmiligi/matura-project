@@ -84,7 +84,7 @@ pub fn main() !u8 {
     var compiler_ = compiler.Compiler.init(allocator);
     defer compiler_.deinit();
 
-    try fileParser.newSource("let a = lambda x. lambda y. lambda z. lambda w. x + y + z + w + 1");
+    try fileParser.newSource("let a = let b = lambda x. lambda y. lambda z. lambda w. x + y + z + w + 1 in b 1 2 3 4");
     var statements = try fileParser.file();
     defer {
         for (statements.items) |*statement| {

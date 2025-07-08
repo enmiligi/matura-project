@@ -1153,7 +1153,7 @@ pub const AlgorithmJ = struct {
                 };
                 return typeOfElse;
             },
-            .call => |call| {
+            .call => |*call| {
                 t.* = self.newVarT();
                 errdefer t.deinit(self.allocator);
                 const t1 = try self.run(call.function);
@@ -1168,6 +1168,8 @@ pub const AlgorithmJ = struct {
                     .to = t,
                 } };
                 defer fType.deinit(self.allocator);
+                fType.rc += 1;
+                call.functionType = fType;
                 self.unify(t1, fType) catch |err| switch (err) {
                     error.CouldNotUnify => {
                         try self.errors.typeComparison(

@@ -61,6 +61,7 @@ pub const AST = union(enum) {
     },
     call: struct {
         function: *AST,
+        functionType: ?*Type = null,
         arg: *AST,
     },
     // The callMult ast node combines consecutive calls into one object
@@ -148,6 +149,9 @@ pub const AST = union(enum) {
             .call => |call| {
                 call.function.deinit(allocator);
                 call.arg.deinit(allocator);
+                if (call.functionType) |t| {
+                    t.deinit(allocator);
+                }
             },
             .callMult => |callMult| {
                 callMult.function.deinit(allocator);

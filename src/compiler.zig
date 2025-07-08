@@ -1,4 +1,7 @@
-pub const c = @cImport(@cInclude("llvm-c/Core.h"));
+pub const c = @cImport({
+    @cInclude("llvm-c/Core.h");
+    @cInclude("llvm-c/TargetMachine.h");
+});
 const AST = @import("ast.zig").AST;
 const std = @import("std");
 const Type = @import("./type_inference.zig").Type;
@@ -13,6 +16,7 @@ pub const Compiler = struct {
     idToValue: std.StringHashMap(c.LLVMValueRef),
     currentFunction: usize,
     allocator: std.mem.Allocator,
+    targetTriple: [*c]u8,
 
     fn impToLLVMType(self: *Compiler, t: *Type, structArgs: *usize) c.LLVMTypeRef {
         switch (t.data) {
@@ -104,6 +108,7 @@ pub const Compiler = struct {
                 c.LLVMSetValueName(boundParam, "bound");
                 const functionBB = c.LLVMAppendBasicBlock(function, "entry");
                 const functionBuilder = c.LLVMCreateBuilder();
+                defer c.LLVMDisposeBuilder(functionBuilder);
                 c.LLVMPositionBuilderAtEnd(functionBuilder, functionBB);
                 self.builder = functionBuilder;
                 var preBoundVals = std.ArrayList(c.LLVMValueRef).init(self.allocator);
@@ -141,23 +146,48 @@ pub const Compiler = struct {
                 const closure = c.LLVMBuildLoad2(self.builder, closureType, closurePtr, "loadClosure");
                 return closure;
             },
+            .call => |call| {
+                const closure = try self.compileExpr(call.function);
+                var _structArgs: usize = 0;
+                const returnType = self.impToLLVMType(call.functionType.?.data.function.to, &_structArgs);
+                const function = c.LLVMBuildExtractValue(self.builder, closure, 0, "functionPointer");
+                const boundPtr = c.LLVMBuildExtractValue(self.builder, closure, 1, "bound");
+                const result = c.LLVMBuildAlloca(self.builder, returnType, "result");
+                const argument = try self.compileExpr(call.arg);
+                var args = [3]c.LLVMValueRef{
+                    result,
+                    argument,
+                    boundPtr,
+                };
+                var param_types = [3]c.LLVMTypeRef{
+                    // To simplify the case of outputting structs,
+                    // all values are returned by changing the value at a given pointer
+                    c.LLVMPointerType(self.impToLLVMType(call.functionType.?.data.function.to, &_structArgs), 0),
+                    self.impToLLVMType(call.functionType.?.data.function.from, &_structArgs),
+                    c.LLVMPointerType(c.LLVMInt8Type(), 0),
+                };
+                const fn_type = c.LLVMFunctionType(c.LLVMVoidType(), &param_types, 3, 0);
+                _ = c.LLVMBuildCall2(self.builder, fn_type, function, &args, 3, "");
+                const loadedResult = c.LLVMBuildLoad2(self.builder, returnType, result, "value");
+                return loadedResult;
+            },
             .boolConstant => |b| {
                 return c.LLVMConstInt(
-                    c.LLVMInt1TypeInContext(self.context),
+                    c.LLVMInt1Type(),
                     if (b.value) 1 else 0,
                     0,
                 );
             },
             .intConstant => |i| {
                 return c.LLVMConstInt(
-                    c.LLVMInt64TypeInContext(self.context),
+                    c.LLVMInt64Type(),
                     @bitCast(i.value),
                     0,
                 );
             },
             .floatConstant => |f| {
                 return c.LLVMConstReal(
-                    c.LLVMDoubleTypeInContext(self.context),
+                    c.LLVMDoubleType(),
                     f.value,
                 );
             },
@@ -383,6 +413,8 @@ pub const Compiler = struct {
     pub fn init(allocator: std.mem.Allocator) Compiler {
         const context = c.LLVMContextCreate();
         const module = c.LLVMModuleCreateWithNameInContext("Imp", context);
+        const targetTriple = c.LLVMGetDefaultTargetTriple();
+        c.LLVMSetTarget(module, targetTriple);
         var topLevelArgs = [0]c.LLVMTypeRef{};
         const topLevelType = c.LLVMFunctionType(c.LLVMVoidType(), &topLevelArgs, 0, 0);
         const topLevel = c.LLVMAddFunction(module, "topLevel", topLevelType);
@@ -402,6 +434,7 @@ pub const Compiler = struct {
             .idToValue = .init(allocator),
             .currentFunction = 0,
             .allocator = allocator,
+            .targetTriple = targetTriple,
         };
     }
 
@@ -409,6 +442,8 @@ pub const Compiler = struct {
         c.LLVMDisposeBuilder(self.builder);
         c.LLVMDisposeModule(self.module);
         c.LLVMContextDispose(self.context);
+        c.LLVMDisposeMessage(self.targetTriple);
+        c.LLVMShutdown();
         self.idToValue.deinit();
     }
 };
