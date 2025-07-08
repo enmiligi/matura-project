@@ -84,7 +84,7 @@ pub fn main() !u8 {
     var compiler_ = compiler.Compiler.init(allocator);
     defer compiler_.deinit();
 
-    try fileParser.newSource("let a = if 2 < 1 then 5.0^2.0 else 3.0^1.0");
+    try fileParser.newSource("let a = let b = lambda x. lambda y. x + y + 1 in if (b 1 3) <= 4 then 7 else 5");
     var statements = try fileParser.file();
     defer {
         for (statements.items) |*statement| {

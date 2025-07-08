@@ -77,7 +77,6 @@ pub const Compiler = struct {
                 const argType = self.impToLLVMType(lambda.type.?.data.function.from, &structArgs);
                 structArgs = 0;
                 const returnType = self.impToLLVMType(lambda.type.?.data.function.to, &structArgs);
-                const prevBuilder = self.builder;
                 const prevFunction = self.function;
                 var impEnclosed = std.ArrayList(c.LLVMTypeRef).init(self.allocator);
                 defer impEnclosed.deinit();
@@ -110,11 +109,9 @@ pub const Compiler = struct {
                 const boundParam = c.LLVMGetParam(function, 2);
                 c.LLVMSetValueName(boundParam, "bound");
                 const functionBB = c.LLVMAppendBasicBlock(function, "entry");
-                const functionBuilder = c.LLVMCreateBuilder();
-                defer c.LLVMDisposeBuilder(functionBuilder);
-                c.LLVMPositionBuilderAtEnd(functionBuilder, functionBB);
+                const originalBuilderPos = c.LLVMGetInsertBlock(self.builder);
+                c.LLVMPositionBuilderAtEnd(self.builder, functionBB);
                 self.function = function;
-                self.builder = functionBuilder;
                 var preBoundVals = std.ArrayList(c.LLVMValueRef).init(self.allocator);
                 defer preBoundVals.deinit();
                 for (impEnclosed.items, lambda.encloses.?.items, 0..) |t, name, i| {
@@ -132,7 +129,7 @@ pub const Compiler = struct {
                 const result = try self.compileExpr(lambda.expr);
                 _ = c.LLVMBuildStore(self.builder, result, returnValue);
                 _ = c.LLVMBuildRetVoid(self.builder);
-                self.builder = prevBuilder;
+                c.LLVMPositionBuilderAtEnd(self.builder, originalBuilderPos);
                 self.function = prevFunction;
                 for (lambda.encloses.?.items, preBoundVals.items) |enclosed, value| {
                     try self.idToValue.put(enclosed, value);
