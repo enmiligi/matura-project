@@ -223,6 +223,7 @@ pub const Objects = struct {
         }
         const object = try self.allocator.create(Object);
         object.next = self.newestObject;
+        object.marked = false;
         self.newestObject = object;
         self.objCount += 1;
         return object;
