@@ -1099,7 +1099,7 @@ pub const AlgorithmJ = struct {
                     else => {},
                 }
             },
-            .ifExpr => |ifExpr| {
+            .ifExpr => |*ifExpr| {
                 self.allocator.destroy(t);
                 const boolT = try Type.init(self.allocator);
                 boolT.data = .{
@@ -1151,6 +1151,8 @@ pub const AlgorithmJ = struct {
                         return err;
                     },
                 };
+                typeOfElse.rc += 1;
+                ifExpr.resultType = typeOfElse;
                 return typeOfElse;
             },
             .call => |*call| {

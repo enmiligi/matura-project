@@ -78,6 +78,7 @@ pub const Compiler = struct {
                 structArgs = 0;
                 const returnType = self.impToLLVMType(lambda.type.?.data.function.to, &structArgs);
                 const prevBuilder = self.builder;
+                const prevFunction = self.function;
                 var impEnclosed = std.ArrayList(c.LLVMTypeRef).init(self.allocator);
                 defer impEnclosed.deinit();
                 for (lambda.enclosesTypes.?.items) |t| {
@@ -100,6 +101,8 @@ pub const Compiler = struct {
                         returnType,
                     ));
                 }
+                const resultArg = c.LLVMGetParam(function, 0);
+                c.LLVMSetValueName2(resultArg, "result", 6);
                 const param = c.LLVMGetParam(function, 1);
                 c.LLVMSetValueName2(param, lambda.argname.lexeme.ptr, lambda.argname.lexeme.len);
                 try self.idToValue.put(lambda.argname.lexeme, param);
@@ -110,6 +113,7 @@ pub const Compiler = struct {
                 const functionBuilder = c.LLVMCreateBuilder();
                 defer c.LLVMDisposeBuilder(functionBuilder);
                 c.LLVMPositionBuilderAtEnd(functionBuilder, functionBB);
+                self.function = function;
                 self.builder = functionBuilder;
                 var preBoundVals = std.ArrayList(c.LLVMValueRef).init(self.allocator);
                 defer preBoundVals.deinit();
@@ -129,6 +133,7 @@ pub const Compiler = struct {
                 _ = c.LLVMBuildStore(self.builder, result, returnValue);
                 _ = c.LLVMBuildRetVoid(self.builder);
                 self.builder = prevBuilder;
+                self.function = prevFunction;
                 for (lambda.encloses.?.items, preBoundVals.items) |enclosed, value| {
                     try self.idToValue.put(enclosed, value);
                 }
@@ -403,6 +408,33 @@ pub const Compiler = struct {
             },
             .identifier => |id| {
                 return self.idToValue.get(id.token.lexeme).?;
+            },
+            .ifExpr => |ifExpr| {
+                const condition = try self.compileExpr(ifExpr.predicate);
+                const originalPos = c.LLVMGetInsertBlock(self.builder);
+                var thenBlock = c.LLVMAppendBasicBlock(self.function, "then");
+                c.LLVMPositionBuilderAtEnd(self.builder, thenBlock);
+                const thenValue = try self.compileExpr(ifExpr.thenExpr);
+                thenBlock = c.LLVMGetInsertBlock(self.builder);
+                var elseBlock = c.LLVMAppendBasicBlock(self.function, "else");
+                c.LLVMPositionBuilderAtEnd(self.builder, elseBlock);
+                const elseValue = try self.compileExpr(ifExpr.elseExpr);
+                elseBlock = c.LLVMGetInsertBlock(self.builder);
+                c.LLVMPositionBuilderAtEnd(self.builder, originalPos);
+                _ = c.LLVMBuildCondBr(self.builder, condition, thenBlock, elseBlock);
+                const ifContinueBlock = c.LLVMAppendBasicBlock(self.function, "ifContinue");
+                c.LLVMPositionBuilderAtEnd(self.builder, thenBlock);
+                _ = c.LLVMBuildBr(self.builder, ifContinueBlock);
+                c.LLVMPositionBuilderAtEnd(self.builder, elseBlock);
+                _ = c.LLVMBuildBr(self.builder, ifContinueBlock);
+                c.LLVMPositionBuilderAtEnd(self.builder, ifContinueBlock);
+                var _structArgs: usize = 0;
+                const resultType = self.impToLLVMType(ifExpr.resultType.?, &_structArgs);
+                const phi = c.LLVMBuildPhi(self.builder, resultType, "ifResult");
+                var incomingValues = [2]c.LLVMValueRef{ thenValue, elseValue };
+                var incomingBlocks = [2]c.LLVMBasicBlockRef{ thenBlock, elseBlock };
+                c.LLVMAddIncoming(phi, &incomingValues, &incomingBlocks, 2);
+                return phi;
             },
             else => {
                 return null;

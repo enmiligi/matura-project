@@ -58,6 +58,7 @@ pub const AST = union(enum) {
         predicate: *AST,
         thenExpr: *AST,
         elseExpr: *AST,
+        resultType: ?*Type = null,
     },
     call: struct {
         function: *AST,
@@ -171,6 +172,9 @@ pub const AST = union(enum) {
                 ifExpr.predicate.deinit(allocator);
                 ifExpr.thenExpr.deinit(allocator);
                 ifExpr.elseExpr.deinit(allocator);
+                if (ifExpr.resultType) |resultType| {
+                    resultType.deinit(allocator);
+                }
             },
             .prefixOp => |prefixOp| {
                 prefixOp.expr.deinit(allocator);
