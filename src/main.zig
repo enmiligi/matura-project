@@ -81,10 +81,10 @@ pub fn main() !u8 {
     );
     defer interpreter_.deinit();
 
-    var compiler_ = compiler.Compiler.init(allocator);
+    var compiler_ = compiler.Compiler.init(allocator, &algorithmJ);
     defer compiler_.deinit();
 
-    try fileParser.newSource("let a = let b = lambda x. lambda y. x + y + 1 in if (b 1 3) <= 4 then 7 else 5");
+    try fileParser.newSource("let a = let fact = lambda acc. lambda x. if x > 1 then (fact (acc * x) (x - 1)) else acc in fact 1 4");
     var statements = try fileParser.file();
     defer {
         for (statements.items) |*statement| {

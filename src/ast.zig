@@ -1,6 +1,7 @@
 const std = @import("std");
 const token = @import("./token.zig");
 const Type = @import("./type_inference.zig").Type;
+const TypeScheme = @import("./type_inference.zig").TypeScheme;
 const type_inference = @import("./type_inference.zig");
 const Region = @import("./utils.zig").Region;
 const LLVMTypeRef = @import("./compiler.zig").c.LLVMTypeRef;
@@ -34,6 +35,7 @@ pub const AST = union(enum) {
         name: token.Token,
         be: *AST,
         type: ?TypeAnnotation,
+        actualType: ?*TypeScheme = null,
         in: *AST,
     },
     lambda: struct {
@@ -122,6 +124,9 @@ pub const AST = union(enum) {
                 let.in.deinit(allocator);
                 if (let.type) |t| {
                     t.type.deinit(allocator);
+                }
+                if (let.actualType) |scheme| {
+                    type_inference.deinitScheme(scheme, allocator);
                 }
             },
             .lambda => |lambda| {

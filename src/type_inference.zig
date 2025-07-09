@@ -1256,7 +1256,7 @@ pub const AlgorithmJ = struct {
                 lambda.type = t;
                 t.rc += 1;
             },
-            .let => |let| {
+            .let => |*let| {
                 self.allocator.destroy(t);
                 if (self.globalTypes.contains(let.name.lexeme)) {
                     try self.errors.errorAt(
@@ -1268,11 +1268,11 @@ pub const AlgorithmJ = struct {
                     return error.CouldNotUnify;
                 }
                 const generalised = try self.getLetVarType(let.name, let.be, let.type);
+                let.actualType = generalised;
                 try self.globalTypes.put(let.name.lexeme, generalised);
                 const typeOfExpr = try self.run(let.in);
                 errdefer typeOfExpr.deinit(self.allocator);
                 _ = self.globalTypes.remove(let.name.lexeme);
-                deinitScheme(generalised, self.allocator);
                 return typeOfExpr;
             },
             .case => |case| {
