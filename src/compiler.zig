@@ -20,6 +20,7 @@ pub const Compiler = struct {
     powFunction: c.LLVMValueRef,
     powType: c.LLVMTypeRef,
     idToValue: std.StringHashMap(MaybeRecursive),
+    idToFunctionNumber: std.StringHashMap(usize),
     currentFunction: usize,
     allocator: std.mem.Allocator,
     targetTriple: [*c]u8,
@@ -185,7 +186,21 @@ pub const Compiler = struct {
                 const closure = try self.compileExpr(call.function);
                 var structArgs: usize = 0;
                 const returnType = self.impToLLVMType(call.functionType.?.data.function.to, &structArgs);
-                const function = c.LLVMBuildExtractValue(self.builder, closure, 0, "functionPointer");
+                var function: c.LLVMValueRef = undefined;
+                switch (call.function.*) {
+                    .identifier => |id| {
+                        if (self.idToFunctionNumber.get(id.token.lexeme)) |functionNumber| {
+                            const functionName = try std.fmt.allocPrint(self.allocator, "fun_{d}", .{functionNumber});
+                            defer self.allocator.free(functionName);
+                            function = c.LLVMGetNamedFunction(self.module, functionName.ptr);
+                        } else {
+                            function = c.LLVMBuildExtractValue(self.builder, closure, 0, "functionPointer");
+                        }
+                    },
+                    else => {
+                        function = c.LLVMBuildExtractValue(self.builder, closure, 0, "functionPointer");
+                    },
+                }
                 const boundPtr = c.LLVMBuildExtractValue(self.builder, closure, 1, "bound");
                 const argument = try self.compileExpr(call.arg);
                 if (structArgs != 0) {
@@ -470,7 +485,11 @@ pub const Compiler = struct {
                         "indirectionPtr",
                     );
                     try self.idToValue.put(let.name.lexeme, .{ .value = indirectionPointer, .recursive = true });
+                    try self.idToFunctionNumber.put(let.name.lexeme, self.currentFunction);
                 }
+                defer if (isLambda) {
+                    _ = self.idToFunctionNumber.remove(let.name.lexeme);
+                };
                 defer _ = self.idToValue.remove(let.name.lexeme);
                 const value = try self.compileExpr(let.be);
                 if (isLambda) _ = c.LLVMBuildStore(self.builder, value, indirectionPointer);
@@ -539,6 +558,7 @@ pub const Compiler = struct {
             .powFunction = pow_intrinsic,
             .powType = fn_type,
             .idToValue = .init(allocator),
+            .idToFunctionNumber = .init(allocator),
             .currentFunction = 0,
             .allocator = allocator,
             .targetTriple = targetTriple,
@@ -553,5 +573,6 @@ pub const Compiler = struct {
         c.LLVMDisposeMessage(self.targetTriple);
         c.LLVMShutdown();
         self.idToValue.deinit();
+        self.idToFunctionNumber.deinit();
     }
 };
