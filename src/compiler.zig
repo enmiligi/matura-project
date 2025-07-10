@@ -7,11 +7,6 @@ const std = @import("std");
 const Type = @import("./type_inference.zig").Type;
 const AlgorithmJ = @import("./type_inference.zig").AlgorithmJ;
 
-const MaybeRecursive = struct {
-    value: c.LLVMValueRef,
-    recursive: bool,
-};
-
 pub const Compiler = struct {
     context: c.LLVMContextRef,
     module: c.LLVMModuleRef,
@@ -19,7 +14,7 @@ pub const Compiler = struct {
     function: c.LLVMValueRef,
     powFunction: c.LLVMValueRef,
     powType: c.LLVMTypeRef,
-    idToValue: std.StringHashMap(MaybeRecursive),
+    idToValue: std.StringHashMap(c.LLVMValueRef),
     idToFunctionNumber: std.StringHashMap(usize),
     currentFunction: usize,
     allocator: std.mem.Allocator,
@@ -88,7 +83,14 @@ pub const Compiler = struct {
                 const prevFunction = self.function;
                 var impEnclosed = std.ArrayList(c.LLVMTypeRef).init(self.allocator);
                 defer impEnclosed.deinit();
-                for (lambda.enclosesTypes.?.items) |t| {
+                const originalFunctionNumber = self.currentFunction;
+                for (lambda.enclosesTypes.?.items, lambda.encloses.?.items) |t, id| {
+                    if (self.idToFunctionNumber.get(id)) |functionNumber| {
+                        if (functionNumber != self.currentFunction) {
+                            try impEnclosed.append(c.LLVMPointerType(c.LLVMInt8Type(), 0));
+                        }
+                        continue;
+                    }
                     var _structArgs: usize = 0;
                     try impEnclosed.append(self.impToLLVMType(t, &_structArgs));
                 }
@@ -121,7 +123,7 @@ pub const Compiler = struct {
                 }
                 const param = c.LLVMGetParam(function, 0 + @as(c_uint, @intFromBool(structArgs != 0)));
                 c.LLVMSetValueName2(param, lambda.argname.lexeme.ptr, lambda.argname.lexeme.len);
-                try self.idToValue.put(lambda.argname.lexeme, .{ .value = param, .recursive = false });
+                try self.idToValue.put(lambda.argname.lexeme, param);
                 defer _ = self.idToValue.remove(lambda.argname.lexeme);
                 const boundParam = c.LLVMGetParam(function, 1 + @as(c_uint, @intFromBool(structArgs != 0)));
                 c.LLVMSetValueName(boundParam, "bound");
@@ -129,29 +131,29 @@ pub const Compiler = struct {
                 const originalBuilderPos = c.LLVMGetInsertBlock(self.builder);
                 c.LLVMPositionBuilderAtEnd(self.builder, functionBB);
                 self.function = function;
-                var preBoundVals = std.ArrayList(MaybeRecursive).init(self.allocator);
+                var preBoundVals = std.ArrayList(c.LLVMValueRef).init(self.allocator);
                 defer preBoundVals.deinit();
                 for (lambda.encloses.?.items) |name| {
-                    try preBoundVals.append(self.idToValue.get(name).?);
+                    try preBoundVals.append(self.idToValue.get(name) orelse undefined);
                 }
-                for (impEnclosed.items, lambda.encloses.?.items, 0..) |t, name, i| {
-                    var varPtr = c.LLVMBuildStructGEP2(
+                var enclosedRecursion: usize = 0;
+                for (lambda.encloses.?.items, 0..) |name, i| {
+                    if (self.idToFunctionNumber.get(name)) |functionNumber| {
+                        if (functionNumber == originalFunctionNumber) {
+                            try self.idToValue.put(name, boundParam);
+                            enclosedRecursion += 1;
+                            continue;
+                        }
+                    }
+                    const varPtr = c.LLVMBuildStructGEP2(
                         self.builder,
                         boundStruct,
                         boundParam,
-                        @intCast(i),
+                        @intCast(i - enclosedRecursion),
                         "boundPtr",
                     );
-                    if (self.idToValue.get(name).?.recursive == true) {
-                        varPtr = c.LLVMBuildLoad2(
-                            self.builder,
-                            c.LLVMPointerType(t, 0),
-                            varPtr,
-                            "recursivePtr",
-                        );
-                    }
-                    const loadedVar = c.LLVMBuildLoad2(self.builder, t, varPtr, "boundVar");
-                    try self.idToValue.put(name, .{ .value = loadedVar, .recursive = false });
+                    const loadedVar = c.LLVMBuildLoad2(self.builder, impEnclosed.items[i - enclosedRecursion], varPtr, "boundVar");
+                    try self.idToValue.put(name, loadedVar);
                 }
                 const result = try self.compileExpr(lambda.expr);
                 if (structArgs != 0) {
@@ -164,14 +166,26 @@ pub const Compiler = struct {
                 c.LLVMPositionBuilderAtEnd(self.builder, originalBuilderPos);
                 self.function = prevFunction;
                 for (lambda.encloses.?.items, preBoundVals.items) |enclosed, value| {
+                    if (self.idToFunctionNumber.get(enclosed)) |functionNumber| {
+                        if (functionNumber == originalFunctionNumber) {
+                            continue;
+                        }
+                    }
                     try self.idToValue.put(enclosed, value);
                 }
                 const closureType = self.impToLLVMType(lambda.type.?, &structArgs);
                 const closurePtr = c.LLVMBuildAlloca(self.builder, closureType, "closure");
                 const boundAlloca = c.LLVMBuildMalloc(self.builder, boundStruct, "bound");
+                enclosedRecursion = 0;
                 for (lambda.encloses.?.items, 0..) |name, i| {
-                    const addr = c.LLVMBuildStructGEP2(self.builder, boundStruct, boundAlloca, @intCast(i), "var");
-                    _ = c.LLVMBuildStore(self.builder, self.idToValue.get(name).?.value, addr);
+                    if (self.idToFunctionNumber.get(name)) |functionNumber| {
+                        if (functionNumber == originalFunctionNumber) {
+                            enclosedRecursion += 1;
+                            continue;
+                        }
+                    }
+                    const addr = c.LLVMBuildStructGEP2(self.builder, boundStruct, boundAlloca, @intCast(i - enclosedRecursion), "var");
+                    _ = c.LLVMBuildStore(self.builder, self.idToValue.get(name).?, addr);
                 }
                 const funAddr = c.LLVMBuildStructGEP2(self.builder, closureType, closurePtr, 0, "function");
                 _ = c.LLVMBuildStore(self.builder, function, funAddr);
@@ -461,45 +475,37 @@ pub const Compiler = struct {
                     .lambda => true,
                     else => false,
                 };
-                var valueType: *Type = undefined;
                 if (isLambda) {
-                    switch (let.actualType.?.*) {
-                        .type => |typeOfId| {
-                            typeOfId.rc += 1;
-                            valueType = typeOfId;
-                        },
-                        .forall => |*forall| {
-                            valueType = try self.algorithmJ.instantiate(forall);
-                        },
-                    }
-                }
-                defer if (isLambda) valueType.deinit(self.allocator);
-                var indirectionPointer: c.LLVMValueRef = undefined;
-                if (isLambda) {
-                    var _structArgs: usize = 0;
-                    indirectionPointer = c.LLVMBuildMalloc(
-                        self.builder,
-                        self.impToLLVMType(valueType, &_structArgs),
-                        "indirectionPtr",
-                    );
-                    try self.idToValue.put(let.name.lexeme, .{ .value = indirectionPointer, .recursive = true });
                     try self.idToFunctionNumber.put(let.name.lexeme, self.currentFunction);
                 }
-                defer if (isLambda) {
-                    _ = self.idToFunctionNumber.remove(let.name.lexeme);
-                };
-                defer _ = self.idToValue.remove(let.name.lexeme);
                 const value = try self.compileExpr(let.be);
-                if (isLambda) _ = c.LLVMBuildStore(self.builder, value, indirectionPointer);
-                try self.idToValue.put(let.name.lexeme, .{ .value = value, .recursive = false });
+                if (isLambda) {
+                    _ = self.idToFunctionNumber.remove(let.name.lexeme);
+                }
+                try self.idToValue.put(let.name.lexeme, value);
+                defer _ = self.idToValue.remove(let.name.lexeme);
                 return self.compileExpr(let.in);
             },
             .identifier => |id| {
+                if (self.idToFunctionNumber.get(id.token.lexeme)) |functionNumber| {
+                    var closArgs = [2]c.LLVMTypeRef{
+                        c.LLVMPointerType(c.LLVMInt8Type(), 0),
+                        c.LLVMPointerType(c.LLVMInt8Type(), 0),
+                    };
+                    const closStruct = c.LLVMStructType(&closArgs, 2, 0);
+                    var clos = c.LLVMGetUndef(closStruct);
+                    const functionName = try std.fmt.allocPrint(self.allocator, "fun_{d}", .{functionNumber});
+                    defer self.allocator.free(functionName);
+                    const function = c.LLVMGetNamedFunction(self.module, functionName.ptr);
+                    clos = c.LLVMBuildInsertValue(self.builder, clos, function, 0, "");
+                    clos = c.LLVMBuildInsertValue(self.builder, clos, self.idToValue.get(id.token.lexeme).?, 1, "");
+                    return clos;
+                }
                 if (self.idToValue.get(id.token.lexeme) == null) {
                     // TODO: Print error message
                     return error.UnknownIdentifier;
                 }
-                return self.idToValue.get(id.token.lexeme).?.value;
+                return self.idToValue.get(id.token.lexeme).?;
             },
             .ifExpr => |ifExpr| {
                 const condition = try self.compileExpr(ifExpr.predicate);
