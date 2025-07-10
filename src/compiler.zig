@@ -21,11 +21,11 @@ pub const Compiler = struct {
     targetTriple: [*c]u8,
     algorithmJ: *AlgorithmJ,
 
-    fn impToLLVMType(self: *Compiler, t: *Type, structArgs: *usize) c.LLVMTypeRef {
+    fn impToLLVMType(self: *Compiler, t: *Type) c.LLVMTypeRef {
         switch (t.data) {
             .typeVar => |tV| {
                 if (tV.subst) |subst| {
-                    return self.impToLLVMType(subst, structArgs);
+                    return self.impToLLVMType(subst);
                 } else {
                     // If a type could be any type, set it to Int by default
                     return c.LLVMInt64Type();
@@ -49,14 +49,14 @@ pub const Compiler = struct {
             },
             .number => |num| {
                 // If no substitution, by default Int which is a number
-                return self.impToLLVMType(num.variable, structArgs);
+                return self.impToLLVMType(num.variable);
             },
             .function => |function| {
                 var param_types = [3]c.LLVMTypeRef{
                     // To simplify the case of outputting structs,
                     // all values are returned by changing the value at a given pointer
-                    c.LLVMPointerType(self.impToLLVMType(function.to, structArgs), 0),
-                    self.impToLLVMType(function.from, structArgs),
+                    c.LLVMPointerType(self.impToLLVMType(function.to), 0),
+                    self.impToLLVMType(function.from),
                     c.LLVMPointerType(c.LLVMInt8Type(), 0),
                 };
                 const fn_type = c.LLVMFunctionType(c.LLVMVoidType(), &param_types, 3, 0);
@@ -64,7 +64,6 @@ pub const Compiler = struct {
                     c.LLVMPointerType(fn_type, 0),
                     c.LLVMPointerType(c.LLVMInt8Type(), 0),
                 };
-                structArgs.* = 2;
                 return c.LLVMStructType(&struct_types, 2, 0);
             },
             else => {
@@ -76,10 +75,8 @@ pub const Compiler = struct {
     pub fn compileExpr(self: *Compiler, ast: *AST) !c.LLVMValueRef {
         switch (ast.*) {
             .lambda => |lambda| {
-                var structArgs: usize = 0;
-                const argType = self.impToLLVMType(lambda.type.?.data.function.from, &structArgs);
-                structArgs = 0;
-                const returnType = self.impToLLVMType(lambda.type.?.data.function.to, &structArgs);
+                const argType = self.impToLLVMType(lambda.type.?.data.function.from);
+                const returnType = self.impToLLVMType(lambda.type.?.data.function.to);
                 const prevFunction = self.function;
                 var impEnclosed = std.ArrayList(c.LLVMTypeRef).init(self.allocator);
                 defer impEnclosed.deinit();
@@ -91,41 +88,22 @@ pub const Compiler = struct {
                         }
                         continue;
                     }
-                    var _structArgs: usize = 0;
-                    try impEnclosed.append(self.impToLLVMType(t, &_structArgs));
+                    try impEnclosed.append(self.impToLLVMType(t));
                 }
                 const boundStruct = c.LLVMStructType(impEnclosed.items.ptr, @intCast(impEnclosed.items.len), 0);
                 const boundPtr = c.LLVMPointerType(boundStruct, 0);
                 var functionType: c.LLVMTypeRef = undefined;
-                if (structArgs == 0) {
-                    var functionArgs = [2]c.LLVMTypeRef{ argType, boundPtr };
-                    functionType = c.LLVMFunctionType(returnType, &functionArgs, 2, 0);
-                } else {
-                    var functionArgs = [3]c.LLVMTypeRef{
-                        c.LLVMPointerType(returnType, 0),
-                        argType,
-                        boundPtr,
-                    };
-                    functionType = c.LLVMFunctionType(c.LLVMVoidType(), &functionArgs, 3, 0);
-                }
+                var functionArgs = [2]c.LLVMTypeRef{ argType, boundPtr };
+                functionType = c.LLVMFunctionType(returnType, &functionArgs, 2, 0);
                 const functionName = try std.fmt.allocPrint(self.allocator, "fun_{d}", .{self.currentFunction});
                 defer self.allocator.free(functionName);
                 self.currentFunction += 1;
                 const function = c.LLVMAddFunction(self.module, functionName.ptr, functionType);
-                if (structArgs != 0) {
-                    c.LLVMAddAttributeAtIndex(function, 1, c.LLVMCreateTypeAttribute(
-                        self.context,
-                        c.LLVMGetEnumAttributeKindForName("sret", 4),
-                        returnType,
-                    ));
-                    const resultArg = c.LLVMGetParam(function, 0);
-                    c.LLVMSetValueName2(resultArg, "result", 6);
-                }
-                const param = c.LLVMGetParam(function, 0 + @as(c_uint, @intFromBool(structArgs != 0)));
+                const param = c.LLVMGetParam(function, 0);
                 c.LLVMSetValueName2(param, lambda.argname.lexeme.ptr, lambda.argname.lexeme.len);
                 try self.idToValue.put(lambda.argname.lexeme, param);
                 defer _ = self.idToValue.remove(lambda.argname.lexeme);
-                const boundParam = c.LLVMGetParam(function, 1 + @as(c_uint, @intFromBool(structArgs != 0)));
+                const boundParam = c.LLVMGetParam(function, 1);
                 c.LLVMSetValueName(boundParam, "bound");
                 const functionBB = c.LLVMAppendBasicBlock(function, "entry");
                 const originalBuilderPos = c.LLVMGetInsertBlock(self.builder);
@@ -156,13 +134,7 @@ pub const Compiler = struct {
                     try self.idToValue.put(name, loadedVar);
                 }
                 const result = try self.compileExpr(lambda.expr);
-                if (structArgs != 0) {
-                    const returnValue = c.LLVMGetParam(function, 0);
-                    _ = c.LLVMBuildStore(self.builder, result, returnValue);
-                    _ = c.LLVMBuildRetVoid(self.builder);
-                } else {
-                    _ = c.LLVMBuildRet(self.builder, result);
-                }
+                _ = c.LLVMBuildRet(self.builder, result);
                 c.LLVMPositionBuilderAtEnd(self.builder, originalBuilderPos);
                 self.function = prevFunction;
                 for (lambda.encloses.?.items, preBoundVals.items) |enclosed, value| {
@@ -173,7 +145,7 @@ pub const Compiler = struct {
                     }
                     try self.idToValue.put(enclosed, value);
                 }
-                const closureType = self.impToLLVMType(lambda.type.?, &structArgs);
+                const closureType = self.impToLLVMType(lambda.type.?);
                 var closure = c.LLVMGetUndef(closureType);
                 const boundMalloc = c.LLVMBuildMalloc(self.builder, boundStruct, "bound");
                 enclosedRecursion = 0;
@@ -193,8 +165,7 @@ pub const Compiler = struct {
             },
             .call => |call| {
                 const closure = try self.compileExpr(call.function);
-                var structArgs: usize = 0;
-                const returnType = self.impToLLVMType(call.functionType.?.data.function.to, &structArgs);
+                const returnType = self.impToLLVMType(call.functionType.?.data.function.to);
                 var function: c.LLVMValueRef = undefined;
                 switch (call.function.*) {
                     .identifier => |id| {
@@ -212,36 +183,16 @@ pub const Compiler = struct {
                 }
                 const boundPtr = c.LLVMBuildExtractValue(self.builder, closure, 1, "bound");
                 const argument = try self.compileExpr(call.arg);
-                if (structArgs != 0) {
-                    const result = c.LLVMBuildAlloca(self.builder, returnType, "result");
-                    var args = [3]c.LLVMValueRef{
-                        result,
-                        argument,
-                        boundPtr,
-                    };
-                    var param_types = [3]c.LLVMTypeRef{
-                        // To simplify the case of outputting structs,
-                        // they are returned by changing the value at a given pointer
-                        c.LLVMPointerType(self.impToLLVMType(call.functionType.?.data.function.to, &structArgs), 0),
-                        self.impToLLVMType(call.functionType.?.data.function.from, &structArgs),
-                        c.LLVMPointerType(c.LLVMInt8Type(), 0),
-                    };
-                    const fn_type = c.LLVMFunctionType(c.LLVMVoidType(), &param_types, 3, 0);
-                    _ = c.LLVMBuildCall2(self.builder, fn_type, function, &args, 3, "");
-                    const loadedResult = c.LLVMBuildLoad2(self.builder, returnType, result, "value");
-                    return loadedResult;
-                } else {
-                    var args = [2]c.LLVMValueRef{
-                        argument,
-                        boundPtr,
-                    };
-                    var param_types = [2]c.LLVMTypeRef{
-                        self.impToLLVMType(call.functionType.?.data.function.from, &structArgs),
-                        c.LLVMPointerType(c.LLVMInt8Type(), 0),
-                    };
-                    const fn_type = c.LLVMFunctionType(returnType, &param_types, 2, 0);
-                    return c.LLVMBuildCall2(self.builder, fn_type, function, &args, 2, "");
-                }
+                var args = [2]c.LLVMValueRef{
+                    argument,
+                    boundPtr,
+                };
+                var param_types = [2]c.LLVMTypeRef{
+                    self.impToLLVMType(call.functionType.?.data.function.from),
+                    c.LLVMPointerType(c.LLVMInt8Type(), 0),
+                };
+                const fn_type = c.LLVMFunctionType(returnType, &param_types, 2, 0);
+                return c.LLVMBuildCall2(self.builder, fn_type, function, &args, 2, "");
             },
             .boolConstant => |b| {
                 return c.LLVMConstInt(
@@ -523,8 +474,7 @@ pub const Compiler = struct {
                 c.LLVMPositionBuilderAtEnd(self.builder, elseBlock);
                 _ = c.LLVMBuildBr(self.builder, ifContinueBlock);
                 c.LLVMPositionBuilderAtEnd(self.builder, ifContinueBlock);
-                var _structArgs: usize = 0;
-                const resultType = self.impToLLVMType(ifExpr.resultType.?, &_structArgs);
+                const resultType = self.impToLLVMType(ifExpr.resultType.?);
                 const phi = c.LLVMBuildPhi(self.builder, resultType, "ifResult");
                 var incomingValues = [2]c.LLVMValueRef{ thenValue, elseValue };
                 var incomingBlocks = [2]c.LLVMBasicBlockRef{ thenBlock, elseBlock };
