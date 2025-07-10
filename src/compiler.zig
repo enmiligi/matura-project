@@ -174,8 +174,8 @@ pub const Compiler = struct {
                     try self.idToValue.put(enclosed, value);
                 }
                 const closureType = self.impToLLVMType(lambda.type.?, &structArgs);
-                const closurePtr = c.LLVMBuildAlloca(self.builder, closureType, "closure");
-                const boundAlloca = c.LLVMBuildMalloc(self.builder, boundStruct, "bound");
+                var closure = c.LLVMGetUndef(closureType);
+                const boundMalloc = c.LLVMBuildMalloc(self.builder, boundStruct, "bound");
                 enclosedRecursion = 0;
                 for (lambda.encloses.?.items, 0..) |name, i| {
                     if (self.idToFunctionNumber.get(name)) |functionNumber| {
@@ -184,14 +184,11 @@ pub const Compiler = struct {
                             continue;
                         }
                     }
-                    const addr = c.LLVMBuildStructGEP2(self.builder, boundStruct, boundAlloca, @intCast(i - enclosedRecursion), "var");
+                    const addr = c.LLVMBuildStructGEP2(self.builder, boundStruct, boundMalloc, @intCast(i - enclosedRecursion), "var");
                     _ = c.LLVMBuildStore(self.builder, self.idToValue.get(name).?, addr);
                 }
-                const funAddr = c.LLVMBuildStructGEP2(self.builder, closureType, closurePtr, 0, "function");
-                _ = c.LLVMBuildStore(self.builder, function, funAddr);
-                const boundAddr = c.LLVMBuildStructGEP2(self.builder, closureType, closurePtr, 1, "boundAddr");
-                _ = c.LLVMBuildStore(self.builder, boundAlloca, boundAddr);
-                const closure = c.LLVMBuildLoad2(self.builder, closureType, closurePtr, "loadClosure");
+                closure = c.LLVMBuildInsertValue(self.builder, closure, function, 0, "");
+                closure = c.LLVMBuildInsertValue(self.builder, closure, boundMalloc, 1, "");
                 return closure;
             },
             .call => |call| {
