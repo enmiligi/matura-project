@@ -164,8 +164,6 @@ pub const Compiler = struct {
                 c.LLVMPositionBuilderAtEnd(self.builder, originalBuilderPos);
                 self.function = prevFunction;
                 for (lambda.encloses.?.items, preBoundVals.items) |enclosed, value| {
-                    std.debug.print("{s}", .{enclosed});
-                    c.LLVMDumpValue(value.value);
                     try self.idToValue.put(enclosed, value);
                 }
                 const closureType = self.impToLLVMType(lambda.type.?, &structArgs);
