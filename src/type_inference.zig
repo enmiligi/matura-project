@@ -865,30 +865,41 @@ pub const AlgorithmJ = struct {
 
     fn getLetVarType(self: *AlgorithmJ, name: token.Token, value: *AST, annotation: ?TypeAnnotation) anyerror!*TypeScheme {
         self.depth += 1;
-        const typeOfVarTypeVar = try Type.init(self.allocator);
-        typeOfVarTypeVar.* = self.newVarT();
-        const typeOfVarScheme = self.allocator.create(TypeScheme) catch |err| {
-            typeOfVarTypeVar.deinit(self.allocator);
-            return err;
-        };
-        typeOfVarScheme.* = .{ .type = typeOfVarTypeVar };
-        {
-            errdefer deinitScheme(typeOfVarScheme, self.allocator);
-            try self.globalTypes.put(name.lexeme, typeOfVarScheme);
+        var typeOfVarTypeVar: *Type = undefined;
+        var typeOfVarScheme: *TypeScheme = undefined;
+        switch (value.*) {
+            .lambda => {
+                typeOfVarTypeVar = try Type.init(self.allocator);
+                typeOfVarTypeVar.* = self.newVarT();
+                typeOfVarScheme = self.allocator.create(TypeScheme) catch |err| {
+                    typeOfVarTypeVar.deinit(self.allocator);
+                    return err;
+                };
+                typeOfVarScheme.* = .{ .type = typeOfVarTypeVar };
+                {
+                    errdefer deinitScheme(typeOfVarScheme, self.allocator);
+                    try self.globalTypes.put(name.lexeme, typeOfVarScheme);
+                }
+            },
+            else => {},
         }
         const typeOfVar = try self.run(value);
-        {
-            errdefer typeOfVar.deinit(self.allocator);
-            self.unify(typeOfVarTypeVar, typeOfVar) catch |err| switch (err) {
-                error.CouldNotUnify => {
-                    try self.errors.recursionTwoTypes(value, name.lexeme, typeOfVarTypeVar, typeOfVar);
-                    return err;
-                },
-                error.InfiniteType => {
-                    try self.errors.recursionInfiniteType(value, name.lexeme, typeOfVarTypeVar, typeOfVar);
-                    return err;
-                },
-            };
+        switch (value.*) {
+            .lambda => {
+                errdefer typeOfVar.deinit(self.allocator);
+                self.unify(typeOfVarTypeVar, typeOfVar) catch |err| switch (err) {
+                    error.CouldNotUnify => {
+                        try self.errors.recursionTwoTypes(value, name.lexeme, typeOfVarTypeVar, typeOfVar);
+                        return err;
+                    },
+                    error.InfiniteType => {
+                        try self.errors.recursionInfiniteType(value, name.lexeme, typeOfVarTypeVar, typeOfVar);
+                        return err;
+                    },
+                };
+                deinitScheme(typeOfVarScheme, self.allocator);
+            },
+            else => {},
         }
         if (annotation) |typeAnnotation| {
             errdefer typeOfVar.deinit(self.allocator);
@@ -919,7 +930,6 @@ pub const AlgorithmJ = struct {
             return err;
         };
         errdefer typeOfVar.deinit(self.allocator);
-        deinitScheme(typeOfVarScheme, self.allocator);
         return generalised;
     }
 
