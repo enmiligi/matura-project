@@ -251,7 +251,7 @@ pub fn printType(
     try printTypeWithoutConstraints(t, writer, currentTypeVar, typeVarMap, topLevel, allocator);
 }
 
-const TypeVarSet = std.AutoHashMap(usize, void);
+const TypeVarSet = std.AutoArrayHashMap(usize, void);
 
 // The type for generalised types
 pub const Forall = struct {

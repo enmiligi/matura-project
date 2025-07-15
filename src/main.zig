@@ -11,6 +11,7 @@ pub const errors = @import("./errors.zig");
 pub const optimizer = @import("./optimizer.zig");
 pub const runner = @import("./runner.zig");
 pub const compiler = @import("compiler.zig");
+pub const monomorphization = @import("monomorphization.zig");
 
 const MainError = error{
     WrongUsage,
@@ -98,6 +99,10 @@ pub fn main() !u8 {
     defer tOfExpr.deinit(allocator);
 
     try optimizer.optimizeStatement(&statements.items[0], allocator);
+
+    var boundVars: std.AutoHashMap(usize, void) = .init(allocator);
+    defer boundVars.deinit();
+    try monomorphization.Monomorphizer.instantiateAST(expr, &boundVars);
 
     _ = try compiler_.compileExpr(expr);
 
