@@ -102,20 +102,29 @@ pub const OptimizeClosures = struct {
         switch (ast.*) {
             .intConstant, .floatConstant, .boolConstant, .charConstant => {},
             .identifier => |id| {
-                if (!exclude.contains(id.token.lexeme)) {
+                var name = id.token.lexeme;
+                if (id.token.lexeme[0] == '_') {
+                    var start: usize = 1;
+                    while (std.ascii.isDigit(id.token.lexeme[start]))
+                        start += 1;
+                    name = id.token.lexeme[start..];
+                }
+                if (!exclude.contains(name)) {
                     try found.append(id.token.lexeme);
                     id.idType.?.rc += 1;
                     try foundTypes.append(id.idType.?);
                 }
             },
             .let => |let| {
-                const alreadyPresent = exclude.contains(let.name.lexeme);
                 try exclude.put(let.name.lexeme, undefined);
-                try findEnclosed(let.in, found, foundTypes, exclude);
-                try findEnclosed(let.be, found, foundTypes, exclude);
-                if (!alreadyPresent) {
-                    _ = exclude.remove(let.name.lexeme);
+                if (let.monomorphizations) |monomorphizations| {
+                    for (monomorphizations.items) |monomorphization| {
+                        try findEnclosed(monomorphization, found, foundTypes, exclude);
+                    }
+                } else {
+                    try findEnclosed(let.be, found, foundTypes, exclude);
                 }
+                try findEnclosed(let.in, found, foundTypes, exclude);
             },
             .ifExpr => |ifExpr| {
                 try findEnclosed(ifExpr.predicate, found, foundTypes, exclude);
@@ -164,8 +173,14 @@ pub const OptimizeClosures = struct {
         switch (ast.*) {
             .intConstant, .floatConstant, .boolConstant, .charConstant, .identifier => {},
             .let => |let| {
+                if (let.monomorphizations) |monomorphizations| {
+                    for (monomorphizations.items) |monomorphization| {
+                        try run(monomorphization, allocator);
+                    }
+                } else {
+                    try run(let.be, allocator);
+                }
                 try run(let.in, allocator);
-                try run(let.be, allocator);
             },
             .ifExpr => |ifExpr| {
                 try run(ifExpr.predicate, allocator);

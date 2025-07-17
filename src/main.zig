@@ -85,7 +85,7 @@ pub fn main() !u8 {
     var compiler_ = compiler.Compiler.init(allocator, &algorithmJ);
     defer compiler_.deinit();
 
-    try fileParser.newSource("let a = let fact = lambda acc. lambda x. if x > 1 then (fact (acc * x) (x - 1)) else acc in fact 1 4");
+    try fileParser.newSource("let a = let fact = lambda acc. lambda x. let id = lambda z. z in if id ((id x) > 1) then (fact (acc * x) (x - 1)) else acc in fact 1 4");
     var statements = try fileParser.file();
     defer {
         for (statements.items) |*statement| {
@@ -98,11 +98,16 @@ pub fn main() !u8 {
     const tOfExpr = try algorithmJ.run(expr);
     defer tOfExpr.deinit(allocator);
 
-    try optimizer.optimizeStatement(&statements.items[0], allocator);
-
     var boundVars: std.AutoHashMap(usize, void) = .init(allocator);
     defer boundVars.deinit();
     try monomorphization.Monomorphizer.instantiateAST(expr, &boundVars);
+
+    var monomorphizer = monomorphization.Monomorphizer.init(allocator, &algorithmJ);
+    defer monomorphizer.deinit();
+
+    try monomorphizer.monomorphize(expr);
+
+    try optimizer.optimizeStatement(&statements.items[0], allocator);
 
     _ = try compiler_.compileExpr(expr);
 

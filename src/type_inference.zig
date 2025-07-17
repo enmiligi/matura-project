@@ -856,10 +856,15 @@ pub const AlgorithmJ = struct {
         try self.findFreeVars(t, minDepth, &freeVars);
         errdefer freeVars.deinit();
         const typeScheme = try self.allocator.create(TypeScheme);
-        typeScheme.* = .{ .forall = .{
-            .typeVars = freeVars,
-            .type = t,
-        } };
+        if (freeVars.count() == 0) {
+            freeVars.deinit();
+            typeScheme.* = .{ .type = t };
+        } else {
+            typeScheme.* = .{ .forall = .{
+                .typeVars = freeVars,
+                .type = t,
+            } };
+        }
         return typeScheme;
     }
 

@@ -419,6 +419,43 @@ pub const Compiler = struct {
                 }
             },
             .let => |let| {
+                if (let.monomorphizations) |monomorphizations| {
+                    var monomorphizationNames = try std.ArrayList([]const u8).initCapacity(
+                        self.allocator,
+                        monomorphizations.items.len,
+                    );
+                    defer monomorphizationNames.deinit();
+                    defer for (monomorphizationNames.items) |name| {
+                        self.allocator.free(name);
+                    };
+                    for (0..monomorphizations.items.len) |i| {
+                        try monomorphizationNames.append(try std.fmt.allocPrint(
+                            self.allocator,
+                            "_{d}{s}",
+                            .{ i, let.name.lexeme },
+                        ));
+                    }
+                    var i: usize = 0;
+                    defer for (0..i) |j| {
+                        _ = self.idToValue.remove(monomorphizationNames.items[j]);
+                    };
+                    for (monomorphizations.items) |monomorphization| {
+                        const isLambda = switch (let.be.*) {
+                            .lambda => true,
+                            else => false,
+                        };
+                        if (isLambda) {
+                            try self.idToFunctionNumber.put(monomorphizationNames.items[i], self.currentFunction);
+                        }
+                        const value = try self.compileExpr(monomorphization);
+                        if (isLambda) {
+                            _ = self.idToFunctionNumber.remove(monomorphizationNames.items[i]);
+                        }
+                        try self.idToValue.put(monomorphizationNames.items[i], value);
+                        i += 1;
+                    }
+                    return self.compileExpr(let.in);
+                }
                 const isLambda = switch (let.be.*) {
                     .lambda => true,
                     else => false,

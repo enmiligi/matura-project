@@ -36,6 +36,8 @@ pub const AST = union(enum) {
         be: *AST,
         type: ?TypeAnnotation,
         actualType: ?*TypeScheme = null,
+        instantiations: ?std.ArrayList([]*Type) = null,
+        monomorphizations: ?std.ArrayList(*AST) = null,
         in: *AST,
     },
     lambda: struct {
@@ -128,6 +130,18 @@ pub const AST = union(enum) {
                 if (let.actualType) |scheme| {
                     type_inference.deinitScheme(scheme, allocator);
                 }
+                if (let.instantiations) |instantiations| {
+                    for (instantiations.items) |instantiation| {
+                        allocator.free(instantiation);
+                    }
+                    instantiations.deinit();
+                }
+                if (let.monomorphizations) |monomorphizations| {
+                    for (monomorphizations.items) |monomorphization| {
+                        monomorphization.deinit(allocator);
+                    }
+                    monomorphizations.deinit();
+                }
             },
             .lambda => |lambda| {
                 lambda.expr.deinit(allocator);
@@ -208,6 +222,9 @@ pub const AST = union(enum) {
                 if (id.idType) |t| {
                     t.deinit(allocator);
                 }
+                if (id.token.lexeme[0] == '_') {
+                    allocator.free(id.token.lexeme);
+                }
             },
             else => {},
         }
@@ -228,6 +245,9 @@ pub const AST = union(enum) {
             .let => |let| {
                 try writer.print("Let(name: {s}, be: ", .{let.name.lexeme});
                 try let.be.print(writer);
+                if (let.monomorphizations) |monomorphizations| {
+                    try writer.print(", monomorphizations: {d}", .{monomorphizations.items.len});
+                }
                 try writer.print(", in: ", .{});
                 try let.in.print(writer);
                 try writer.print(")", .{});
