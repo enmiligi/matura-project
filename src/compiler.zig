@@ -128,9 +128,10 @@ pub const Compiler = struct {
                         boundStruct,
                         boundParam,
                         @intCast(i - enclosedRecursion),
-                        "boundPtr",
+                        "",
                     );
-                    const loadedVar = c.LLVMBuildLoad2(self.builder, impEnclosed.items[i - enclosedRecursion], varPtr, "boundVar");
+                    const loadedVar = c.LLVMBuildLoad2(self.builder, impEnclosed.items[i - enclosedRecursion], varPtr, "");
+                    c.LLVMSetValueName2(loadedVar, name.ptr, name.len);
                     try self.idToValue.put(name, loadedVar);
                 }
                 const result = try self.compileExpr(lambda.expr);
@@ -156,7 +157,7 @@ pub const Compiler = struct {
                             continue;
                         }
                     }
-                    const addr = c.LLVMBuildStructGEP2(self.builder, boundStruct, boundMalloc, @intCast(i - enclosedRecursion), "var");
+                    const addr = c.LLVMBuildStructGEP2(self.builder, boundStruct, boundMalloc, @intCast(i - enclosedRecursion), "");
                     _ = c.LLVMBuildStore(self.builder, self.idToValue.get(name).?, addr);
                 }
                 closure = c.LLVMBuildInsertValue(self.builder, closure, function, 0, "");
@@ -267,52 +268,52 @@ pub const Compiler = struct {
                 switch (op.token.lexeme[0]) {
                     '^' => {
                         var args = [2]c.LLVMValueRef{ left, right };
-                        return c.LLVMBuildCall2(self.builder, self.powType, self.powFunction, &args, 2, "exp");
+                        return c.LLVMBuildCall2(self.builder, self.powType, self.powFunction, &args, 2, "");
                     },
                     '+' => {
                         if (isInt) {
-                            return c.LLVMBuildAdd(self.builder, left, right, "add");
+                            return c.LLVMBuildAdd(self.builder, left, right, "");
                         } else if (isFloat) {
-                            return c.LLVMBuildFAdd(self.builder, left, right, "add");
+                            return c.LLVMBuildFAdd(self.builder, left, right, "");
                         }
                         unreachable;
                     },
                     '-' => {
                         if (isInt) {
-                            return c.LLVMBuildSub(self.builder, left, right, "sub");
+                            return c.LLVMBuildSub(self.builder, left, right, "");
                         } else if (isFloat) {
-                            return c.LLVMBuildFSub(self.builder, left, right, "sub");
+                            return c.LLVMBuildFSub(self.builder, left, right, "");
                         }
                         unreachable;
                     },
                     '*' => {
                         if (isInt) {
-                            return c.LLVMBuildMul(self.builder, left, right, "mul");
+                            return c.LLVMBuildMul(self.builder, left, right, "");
                         } else if (isFloat) {
-                            return c.LLVMBuildFMul(self.builder, left, right, "mul");
+                            return c.LLVMBuildFMul(self.builder, left, right, "");
                         }
                         unreachable;
                     },
                     '/' => {
                         if (isInt) {
-                            return c.LLVMBuildSDiv(self.builder, left, right, "div");
+                            return c.LLVMBuildSDiv(self.builder, left, right, "");
                         } else if (isFloat) {
-                            return c.LLVMBuildFDiv(self.builder, left, right, "div");
+                            return c.LLVMBuildFDiv(self.builder, left, right, "");
                         }
                         unreachable;
                     },
                     '<' => {
                         if (op.token.lexeme.len != 1) {
                             if (isInt) {
-                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSLE, left, right, "lt");
+                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSLE, left, right, "");
                             } else if (isFloat) {
-                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOLE, left, right, "lt");
+                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOLE, left, right, "");
                             }
                         } else {
                             if (isInt) {
-                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSLT, left, right, "lt");
+                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSLT, left, right, "");
                             } else if (isFloat) {
-                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOLT, left, right, "lt");
+                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOLT, left, right, "");
                             }
                         }
                         unreachable;
@@ -320,40 +321,40 @@ pub const Compiler = struct {
                     '>' => {
                         if (op.token.lexeme.len != 1) {
                             if (isInt) {
-                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSGE, left, right, "lt");
+                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSGE, left, right, "");
                             } else if (isFloat) {
-                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOGE, left, right, "lt");
+                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOGE, left, right, "");
                             }
                         } else {
                             if (isInt) {
-                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSGT, left, right, "lt");
+                                return c.LLVMBuildICmp(self.builder, c.LLVMIntSGT, left, right, "");
                             } else if (isFloat) {
-                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOGT, left, right, "lt");
+                                return c.LLVMBuildFCmp(self.builder, c.LLVMRealOGT, left, right, "");
                             }
                         }
                         unreachable;
                     },
                     '=' => {
                         if (isInt or isChar or isBool) {
-                            return c.LLVMBuildICmp(self.builder, c.LLVMIntEQ, left, right, "lt");
+                            return c.LLVMBuildICmp(self.builder, c.LLVMIntEQ, left, right, "");
                         } else if (isFloat) {
-                            return c.LLVMBuildFCmp(self.builder, c.LLVMRealOEQ, left, right, "lt");
+                            return c.LLVMBuildFCmp(self.builder, c.LLVMRealOEQ, left, right, "");
                         }
                         unreachable;
                     },
                     '!' => {
                         if (isInt or isChar or isBool) {
-                            return c.LLVMBuildICmp(self.builder, c.LLVMIntNE, left, right, "lt");
+                            return c.LLVMBuildICmp(self.builder, c.LLVMIntNE, left, right, "");
                         } else if (isFloat) {
-                            return c.LLVMBuildFCmp(self.builder, c.LLVMRealUNE, left, right, "lt");
+                            return c.LLVMBuildFCmp(self.builder, c.LLVMRealUNE, left, right, "");
                         }
                         unreachable;
                     },
                     'a' => {
-                        return c.LLVMBuildAnd(self.builder, left, right, "and");
+                        return c.LLVMBuildAnd(self.builder, left, right, "");
                     },
                     'o' => {
-                        return c.LLVMBuildOr(self.builder, left, right, "or");
+                        return c.LLVMBuildOr(self.builder, left, right, "");
                     },
                     ';' => {
                         return right;
@@ -403,13 +404,13 @@ pub const Compiler = struct {
                 const arg = try self.compileExpr(op.expr);
                 switch (op.token.lexeme[0]) {
                     '!' => {
-                        return c.LLVMBuildNot(self.builder, arg, "not");
+                        return c.LLVMBuildNot(self.builder, arg, "");
                     },
                     '-' => {
                         if (isInt) {
-                            return c.LLVMBuildNeg(self.builder, arg, "negate");
+                            return c.LLVMBuildNeg(self.builder, arg, "");
                         } else if (isFloat) {
-                            return c.LLVMBuildFNeg(self.builder, arg, "negate");
+                            return c.LLVMBuildFNeg(self.builder, arg, "");
                         }
                         unreachable;
                     },
@@ -448,6 +449,7 @@ pub const Compiler = struct {
                             try self.idToFunctionNumber.put(monomorphizationNames.items[i], self.currentFunction);
                         }
                         const value = try self.compileExpr(monomorphization);
+                        c.LLVMSetValueName2(value, monomorphizationNames.items[i].ptr, monomorphizationNames.items[i].len);
                         if (isLambda) {
                             _ = self.idToFunctionNumber.remove(monomorphizationNames.items[i]);
                         }
@@ -464,6 +466,7 @@ pub const Compiler = struct {
                     try self.idToFunctionNumber.put(let.name.lexeme, self.currentFunction);
                 }
                 const value = try self.compileExpr(let.be);
+                c.LLVMSetValueName2(value, let.name.lexeme.ptr, let.name.lexeme.len);
                 if (isLambda) {
                     _ = self.idToFunctionNumber.remove(let.name.lexeme);
                 }
@@ -485,10 +488,6 @@ pub const Compiler = struct {
                     clos = c.LLVMBuildInsertValue(self.builder, clos, function, 0, "");
                     clos = c.LLVMBuildInsertValue(self.builder, clos, self.idToValue.get(id.token.lexeme).?, 1, "");
                     return clos;
-                }
-                if (self.idToValue.get(id.token.lexeme) == null) {
-                    // TODO: Print error message
-                    return error.UnknownIdentifier;
                 }
                 return self.idToValue.get(id.token.lexeme).?;
             },
