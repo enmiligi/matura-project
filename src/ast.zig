@@ -356,6 +356,9 @@ pub const Statement = union(enum) {
         name: token.Token,
         be: *AST,
         annotation: ?TypeAnnotation,
+        actualType: ?*TypeScheme = null,
+        instantiations: ?std.ArrayList([]*Type) = null,
+        monomorphizations: ?std.ArrayList(*AST) = null,
     },
     // The type statement declares a type of a given name
     // and stores the constructors in an array
@@ -372,6 +375,18 @@ pub const Statement = union(enum) {
                 let.be.deinit(allocator);
                 if (let.annotation) |tA| {
                     tA.type.deinit(allocator);
+                }
+                if (let.instantiations) |instantiations| {
+                    for (instantiations.items) |instantiation| {
+                        allocator.free(instantiation);
+                    }
+                    instantiations.deinit();
+                }
+                if (let.monomorphizations) |monomorphizations| {
+                    for (monomorphizations.items) |monomorphization| {
+                        monomorphization.deinit(allocator);
+                    }
+                    monomorphizations.deinit();
                 }
             },
             .type => |t| {

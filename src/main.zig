@@ -85,7 +85,11 @@ pub fn main() !u8 {
     var compiler_ = compiler.Compiler.init(allocator, &algorithmJ);
     defer compiler_.deinit();
 
-    try fileParser.newSource("let a = let fact = lambda acc. lambda x. let id = lambda z. z in if id ((id x) > 1) then (fact (acc * x) (x - 1)) else acc in fact 1 4");
+    try fileParser.newSource(
+        \\let identity = lambda x. x
+        \\let fact = lambda acc. lambda x. if identity ((identity x) > 1) then (fact (acc * x) (x - 1)) else acc
+        \\let result = fact 1 4
+    );
     var statements = try fileParser.file();
     defer {
         for (statements.items) |*statement| {
@@ -93,23 +97,23 @@ pub fn main() !u8 {
         }
         statements.deinit();
     }
-    const expr = statements.items[0].let.be;
 
-    const tOfExpr = try algorithmJ.run(expr);
-    defer tOfExpr.deinit(allocator);
+    for (statements.items) |*statement| {
+        try algorithmJ.checkStatement(statement);
+    }
 
-    var boundVars: std.AutoHashMap(usize, void) = .init(allocator);
-    defer boundVars.deinit();
-    try monomorphization.Monomorphizer.instantiateAST(expr, &boundVars);
+    try monomorphization.Monomorphizer.instantiate(allocator, &statements);
 
     var monomorphizer = monomorphization.Monomorphizer.init(allocator, &algorithmJ);
     defer monomorphizer.deinit();
 
-    try monomorphizer.monomorphize(expr);
+    try monomorphizer.monomorphize(&statements);
 
-    try optimizer.optimizeStatement(&statements.items[0], allocator);
+    for (statements.items) |*statement| {
+        try optimizer.optimizeStatement(statement, allocator);
+    }
 
-    _ = try compiler_.compileExpr(expr);
+    _ = try compiler_.compile(&statements);
 
     compiler.c.LLVMDumpModule(compiler_.module);
 

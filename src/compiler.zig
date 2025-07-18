@@ -3,6 +3,7 @@ pub const c = @cImport({
     @cInclude("llvm-c/TargetMachine.h");
 });
 const AST = @import("ast.zig").AST;
+const Statement = @import("ast.zig").Statement;
 const std = @import("std");
 const Type = @import("./type_inference.zig").Type;
 const AlgorithmJ = @import("./type_inference.zig").AlgorithmJ;
@@ -20,6 +21,7 @@ pub const Compiler = struct {
     allocator: std.mem.Allocator,
     targetTriple: [*c]u8,
     algorithmJ: *AlgorithmJ,
+    namesToFree: std.ArrayList([]const u8),
 
     fn impToLLVMType(self: *Compiler, t: *Type) c.LLVMTypeRef {
         switch (t.data) {
@@ -70,6 +72,55 @@ pub const Compiler = struct {
                 return null;
             },
         }
+    }
+
+    fn putValue(self: *Compiler, expr: *AST, name: []const u8) anyerror!void {
+        const isLambda = switch (expr.*) {
+            .lambda => true,
+            else => false,
+        };
+        if (isLambda) {
+            try self.idToFunctionNumber.put(name, self.currentFunction);
+        }
+        const value = try self.compileExpr(expr);
+        c.LLVMSetValueName2(value, name.ptr, name.len);
+        if (isLambda) {
+            _ = self.idToFunctionNumber.remove(name);
+        }
+        try self.idToValue.put(name, value);
+    }
+
+    fn compileLet(
+        self: *Compiler,
+        name: []const u8,
+        be: *AST,
+        maybeMonomorphizations: ?std.ArrayList(*AST),
+    ) !?std.ArrayList([]const u8) {
+        if (maybeMonomorphizations) |monomorphizations| {
+            var monomorphizationNames = try std.ArrayList([]const u8).initCapacity(
+                self.allocator,
+                monomorphizations.items.len,
+            );
+            errdefer monomorphizationNames.deinit();
+            errdefer for (monomorphizationNames.items) |monomorphizationName| {
+                self.allocator.free(monomorphizationName);
+            };
+            for (0..monomorphizations.items.len) |i| {
+                const monomorphizationName = try std.fmt.allocPrint(
+                    self.allocator,
+                    "_{d}{s}",
+                    .{ i, name },
+                );
+                errdefer self.allocator.free(monomorphizationName);
+                try monomorphizationNames.append(monomorphizationName);
+            }
+            for (monomorphizations.items, 0..) |monomorphization, i| {
+                try self.putValue(monomorphization, monomorphizationNames.items[i]);
+            }
+            return monomorphizationNames;
+        }
+        try self.putValue(be, name);
+        return null;
     }
 
     pub fn compileExpr(self: *Compiler, ast: *AST) !c.LLVMValueRef {
@@ -420,58 +471,18 @@ pub const Compiler = struct {
                 }
             },
             .let => |let| {
-                if (let.monomorphizations) |monomorphizations| {
-                    var monomorphizationNames = try std.ArrayList([]const u8).initCapacity(
-                        self.allocator,
-                        monomorphizations.items.len,
-                    );
-                    defer monomorphizationNames.deinit();
-                    defer for (monomorphizationNames.items) |name| {
+                const toFreeAndDelete = try self.compileLet(
+                    let.name.lexeme,
+                    let.be,
+                    let.monomorphizations,
+                );
+                defer if (toFreeAndDelete) |names| {
+                    for (names.items) |name| {
+                        _ = self.idToValue.remove(name);
                         self.allocator.free(name);
-                    };
-                    for (0..monomorphizations.items.len) |i| {
-                        try monomorphizationNames.append(try std.fmt.allocPrint(
-                            self.allocator,
-                            "_{d}{s}",
-                            .{ i, let.name.lexeme },
-                        ));
                     }
-                    var i: usize = 0;
-                    defer for (0..i) |j| {
-                        _ = self.idToValue.remove(monomorphizationNames.items[j]);
-                    };
-                    for (monomorphizations.items) |monomorphization| {
-                        const isLambda = switch (let.be.*) {
-                            .lambda => true,
-                            else => false,
-                        };
-                        if (isLambda) {
-                            try self.idToFunctionNumber.put(monomorphizationNames.items[i], self.currentFunction);
-                        }
-                        const value = try self.compileExpr(monomorphization);
-                        c.LLVMSetValueName2(value, monomorphizationNames.items[i].ptr, monomorphizationNames.items[i].len);
-                        if (isLambda) {
-                            _ = self.idToFunctionNumber.remove(monomorphizationNames.items[i]);
-                        }
-                        try self.idToValue.put(monomorphizationNames.items[i], value);
-                        i += 1;
-                    }
-                    return self.compileExpr(let.in);
-                }
-                const isLambda = switch (let.be.*) {
-                    .lambda => true,
-                    else => false,
+                    names.deinit();
                 };
-                if (isLambda) {
-                    try self.idToFunctionNumber.put(let.name.lexeme, self.currentFunction);
-                }
-                const value = try self.compileExpr(let.be);
-                c.LLVMSetValueName2(value, let.name.lexeme.ptr, let.name.lexeme.len);
-                if (isLambda) {
-                    _ = self.idToFunctionNumber.remove(let.name.lexeme);
-                }
-                try self.idToValue.put(let.name.lexeme, value);
-                defer _ = self.idToValue.remove(let.name.lexeme);
                 return self.compileExpr(let.in);
             },
             .identifier => |id| {
@@ -523,6 +534,29 @@ pub const Compiler = struct {
         }
     }
 
+    pub fn compile(self: *Compiler, statements: *std.ArrayList(Statement)) !void {
+        for (statements.items) |statement| {
+            switch (statement) {
+                .let => |let| {
+                    const toFreeAndDelete = try self.compileLet(
+                        let.name.lexeme,
+                        let.be,
+                        let.monomorphizations,
+                    );
+                    if (toFreeAndDelete) |names| {
+                        defer names.deinit();
+                        errdefer for (names.items) |name| {
+                            self.allocator.free(name);
+                        };
+                        try self.namesToFree.appendSlice(names.items);
+                    }
+                },
+                // TODO
+                .type => {},
+            }
+        }
+    }
+
     pub fn init(allocator: std.mem.Allocator, algorithmJ: *AlgorithmJ) Compiler {
         const context = c.LLVMContextCreate();
         const module = c.LLVMModuleCreateWithNameInContext("Imp", context);
@@ -546,6 +580,7 @@ pub const Compiler = struct {
             .powType = fn_type,
             .idToValue = .init(allocator),
             .idToFunctionNumber = .init(allocator),
+            .namesToFree = .init(allocator),
             .currentFunction = 0,
             .allocator = allocator,
             .targetTriple = targetTriple,
@@ -561,5 +596,9 @@ pub const Compiler = struct {
         c.LLVMShutdown();
         self.idToValue.deinit();
         self.idToFunctionNumber.deinit();
+        for (self.namesToFree.items) |name| {
+            self.allocator.free(name);
+        }
+        self.namesToFree.deinit();
     }
 };

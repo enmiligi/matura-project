@@ -1283,11 +1283,14 @@ pub const AlgorithmJ = struct {
                     return error.CouldNotUnify;
                 }
                 const generalised = try self.getLetVarType(let.name, let.be, let.type);
-                let.actualType = generalised;
-                try self.globalTypes.put(let.name.lexeme, generalised);
+                self.globalTypes.put(let.name.lexeme, generalised) catch |err| {
+                    deinitScheme(generalised, self.allocator);
+                    return err;
+                };
                 const typeOfExpr = try self.run(let.in);
                 errdefer typeOfExpr.deinit(self.allocator);
                 _ = self.globalTypes.remove(let.name.lexeme);
+                let.actualType = generalised;
                 return typeOfExpr;
             },
             .case => |case| {
@@ -1540,15 +1543,15 @@ pub const AlgorithmJ = struct {
         return t;
     }
 
-    pub fn checkStatement(self: *AlgorithmJ, statement: Statement) !void {
-        switch (statement) {
-            .let => |let| {
+    pub fn checkStatement(self: *AlgorithmJ, statement: *Statement) !void {
+        switch (statement.*) {
+            .let => |*let| {
                 if (self.globalTypes.contains(let.name.lexeme)) {
                     try self.errors.errorAt(let.name.start, let.name.end, "The name '{s}' is already used.", .{let.name.lexeme});
                     return error.CouldNotUnify;
                 }
                 const t = try self.getLetVarType(let.name, let.be, let.annotation);
-                errdefer deinitScheme(t, self.allocator);
+                let.actualType = t;
                 try self.globalTypes.put(let.name.lexeme, t);
             },
             .type => |typeDecl| {

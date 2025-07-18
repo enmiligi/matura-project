@@ -4,6 +4,7 @@ const Type = type_inference.Type;
 const TypeScheme = type_inference.TypeScheme;
 const Forall = type_inference.Forall;
 const AST = @import("ast.zig").AST;
+const Statement = @import("ast.zig").Statement;
 
 const MultiSubstitution = struct {
     variables: []usize,
@@ -59,6 +60,44 @@ pub const Monomorphizer = struct {
                 instantiateFreeVars(number.variable, boundVars);
             },
             .primitive => {},
+        }
+    }
+
+    pub fn instantiate(
+        allocator: std.mem.Allocator,
+        statements: *std.ArrayList(Statement),
+    ) !void {
+        var boundVars = std.AutoHashMap(usize, void).init(allocator);
+        defer boundVars.deinit();
+        for (statements.items) |*statement| {
+            switch (statement.*) {
+                .let => |*let| {
+                    var variableType: *Type = undefined;
+                    switch (let.actualType.?.*) {
+                        .forall => |forall| {
+                            for (forall.typeVars.keys()) |tVNum| {
+                                try boundVars.put(tVNum, undefined);
+                            }
+                            variableType = forall.type;
+                        },
+                        .type => |t| {
+                            variableType = t;
+                        },
+                    }
+                    instantiateFreeVars(variableType, &boundVars);
+                    try instantiateAST(let.be, &boundVars);
+                    switch (let.actualType.?.*) {
+                        .forall => |forall| {
+                            for (forall.typeVars.keys()) |tVNum| {
+                                _ = boundVars.remove(tVNum);
+                            }
+                        },
+                        .type => {},
+                    }
+                },
+                // TODO
+                .type => {},
+            }
         }
     }
 
@@ -183,7 +222,75 @@ pub const Monomorphizer = struct {
         }
     }
 
-    pub fn monomorphize(self: *Monomorphizer, expr: *AST) !void {
+    fn monomorphizeDefinitions(
+        self: *Monomorphizer,
+        typeScheme: *TypeScheme,
+        name: []const u8,
+        expr: *AST,
+        instantiations: *std.ArrayList([]*Type),
+        monomorphizationsLocation: *?std.ArrayList(*AST),
+    ) !void {
+        switch (typeScheme.*) {
+            .type => {
+                try self.monomorphizeExpr(expr);
+            },
+            .forall => |forall| {
+                var monomorphizations = try std.ArrayList(*AST).initCapacity(
+                    self.allocator,
+                    instantiations.items.len,
+                );
+                errdefer for (monomorphizations.items) |monomorphization| {
+                    monomorphization.deinit(self.allocator);
+                };
+                errdefer monomorphizations.deinit();
+                for (instantiations.items, 0..) |instantiation, i| {
+                    self.monomorphizeDefinition = name;
+                    self.monomorphizeNumber = i;
+                    try monomorphizations.append(try self.monomorphizeAST(
+                        expr,
+                        forall.typeVars.keys(),
+                        instantiation,
+                    ));
+                }
+                for (monomorphizations.items) |monomorphization| {
+                    try self.monomorphizeExpr(monomorphization);
+                }
+                monomorphizationsLocation.* = monomorphizations;
+            },
+        }
+    }
+
+    pub fn monomorphize(self: *Monomorphizer, file: *std.ArrayList(Statement)) !void {
+        for (file.items) |*statement| {
+            switch (statement.*) {
+                .let => |*let| {
+                    let.instantiations = .init(self.allocator);
+                    try self.idToInstantiations.put(let.name.lexeme, &let.instantiations.?);
+                    try self.idToTypeScheme.put(let.name.lexeme, let.actualType.?);
+                },
+                // TODO
+                .type => {},
+            }
+        }
+        for (0..file.items.len) |i| {
+            const statement = &file.items[file.items.len - i - 1];
+            switch (statement.*) {
+                .let => |*let| {
+                    try self.monomorphizeDefinitions(
+                        let.actualType.?,
+                        let.name.lexeme,
+                        let.be,
+                        &let.instantiations.?,
+                        &let.monomorphizations,
+                    );
+                },
+                // TODO
+                .type => {},
+            }
+        }
+    }
+
+    pub fn monomorphizeExpr(self: *Monomorphizer, expr: *AST) anyerror!void {
         switch (expr.*) {
             .intConstant, .floatConstant, .boolConstant, .charConstant => {},
             .identifier => |*id| {
@@ -220,60 +327,39 @@ pub const Monomorphizer = struct {
                 }
             },
             .call => |call| {
-                try self.monomorphize(call.arg);
-                try self.monomorphize(call.function);
+                try self.monomorphizeExpr(call.arg);
+                try self.monomorphizeExpr(call.function);
             },
             .lambda => |lambda| {
-                try self.monomorphize(lambda.expr);
+                try self.monomorphizeExpr(lambda.expr);
             },
             .lambdaMult, .callMult => {},
             .let => |*let| {
                 let.instantiations = .init(self.allocator);
                 try self.idToInstantiations.put(let.name.lexeme, &let.instantiations.?);
                 try self.idToTypeScheme.put(let.name.lexeme, let.actualType.?);
-                try self.monomorphize(let.in);
+                try self.monomorphizeExpr(let.in);
                 _ = self.idToInstantiations.remove(let.name.lexeme);
                 _ = self.idToTypeScheme.remove(let.name.lexeme);
-                switch (let.actualType.?.*) {
-                    .type => {
-                        try self.monomorphize(let.be);
-                    },
-                    .forall => |forall| {
-                        var monomorphizations = try std.ArrayList(*AST).initCapacity(
-                            self.allocator,
-                            let.instantiations.?.items.len,
-                        );
-                        errdefer for (monomorphizations.items) |monomorphization| {
-                            monomorphization.deinit(self.allocator);
-                        };
-                        errdefer monomorphizations.deinit();
-                        for (let.instantiations.?.items, 0..) |instantiation, i| {
-                            self.monomorphizeDefinition = let.name.lexeme;
-                            self.monomorphizeNumber = i;
-                            try monomorphizations.append(try self.monomorphizeAST(
-                                let.be,
-                                forall.typeVars.keys(),
-                                instantiation,
-                            ));
-                        }
-                        let.monomorphizations = monomorphizations;
-                        for (monomorphizations.items) |monomorphization| {
-                            try self.monomorphize(monomorphization);
-                        }
-                    },
-                }
+                try self.monomorphizeDefinitions(
+                    let.actualType.?,
+                    let.name.lexeme,
+                    let.be,
+                    &let.instantiations.?,
+                    &let.monomorphizations,
+                );
             },
             .operator => |op| {
-                try self.monomorphize(op.right);
-                try self.monomorphize(op.left);
+                try self.monomorphizeExpr(op.right);
+                try self.monomorphizeExpr(op.left);
             },
             .prefixOp => |op| {
-                try self.monomorphize(op.expr);
+                try self.monomorphizeExpr(op.expr);
             },
             .ifExpr => |ifExpr| {
-                try self.monomorphize(ifExpr.elseExpr);
-                try self.monomorphize(ifExpr.thenExpr);
-                try self.monomorphize(ifExpr.predicate);
+                try self.monomorphizeExpr(ifExpr.elseExpr);
+                try self.monomorphizeExpr(ifExpr.thenExpr);
+                try self.monomorphizeExpr(ifExpr.predicate);
             },
             // TODO
             .case, .list => {},

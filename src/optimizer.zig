@@ -367,9 +367,16 @@ pub const OptimizeFullyInstantiatedCalls = struct {
 pub fn optimizeStatement(statement: *Statement, allocator: std.mem.Allocator) !void {
     switch (statement.*) {
         .let => |let| {
-            try ConvertList.run(let.be, allocator);
-            try OptimizeClosures.run(let.be, allocator);
-            //try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
+            if (let.monomorphizations) |monomorphizations| {
+                for (monomorphizations.items) |monomorphization| {
+                    try ConvertList.run(monomorphization, allocator);
+                    try OptimizeClosures.run(monomorphization, allocator);
+                }
+            } else {
+                try ConvertList.run(let.be, allocator);
+                try OptimizeClosures.run(let.be, allocator);
+                //try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
+            }
         },
         .type => {},
     }

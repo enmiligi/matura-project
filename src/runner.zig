@@ -77,7 +77,7 @@ pub const Runner = struct {
 
         // Type check the statements
         for (statements.items) |*statement| {
-            algorithmJ.checkStatement(statement.*) catch |err| switch (err) {
+            algorithmJ.checkStatement(statement) catch |err| switch (err) {
                 error.UnknownIdentifier,
                 error.CouldNotUnify,
                 error.InfiniteType,
