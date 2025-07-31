@@ -82,13 +82,15 @@ pub fn main() !u8 {
     );
     defer interpreter_.deinit();
 
-    var compiler_ = compiler.Compiler.init(allocator, &algorithmJ);
+    var compiler_ = try compiler.Compiler.init(allocator, &algorithmJ);
     defer compiler_.deinit();
 
     try fileParser.newSource(
-        \\let identity = lambda x. x
-        \\let fact = lambda acc. lambda x. if identity ((identity x) > 1) then (fact (acc * x) (x - 1)) else acc
-        \\let result = fact 1 4
+        \\type L a = N | C a (L a)
+        \\let myList = C 5 (C 7 (C 11 N))
+        \\type P a = P a a
+        \\type G a = B a | G (G (P a))
+        \\let grow = G (B (P 1 2))
     );
     var statements = try fileParser.file();
     defer {

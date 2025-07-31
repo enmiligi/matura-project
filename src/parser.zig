@@ -532,6 +532,7 @@ pub const Parser = struct {
             .name = name,
             .compositeType = compositeType,
             .constructors = constructors,
+            .typeArgs = typeArgs,
         } };
     }
 
@@ -843,7 +844,7 @@ pub const Parser = struct {
         var patterns = std.ArrayList(Pattern).init(self.allocator);
         errdefer {
             for (patterns.items) |*currentPattern| {
-                currentPattern.deinit();
+                currentPattern.deinit(self.allocator);
             }
             patterns.deinit();
         }

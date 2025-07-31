@@ -1,18 +1,22 @@
 pub const c = @cImport({
     @cInclude("llvm-c/Core.h");
     @cInclude("llvm-c/TargetMachine.h");
+    @cInclude("llvm-c/Target.h");
 });
 const AST = @import("ast.zig").AST;
 const Statement = @import("ast.zig").Statement;
 const std = @import("std");
 const Type = @import("./type_inference.zig").Type;
 const AlgorithmJ = @import("./type_inference.zig").AlgorithmJ;
+const typesEqual = @import("monomorphization.zig").Monomorphizer.typesEqual;
 
 pub const Compiler = struct {
     context: c.LLVMContextRef,
     module: c.LLVMModuleRef,
     builder: c.LLVMBuilderRef,
     function: c.LLVMValueRef,
+    targetMachine: c.LLVMTargetMachineRef,
+    dataLayout: c.LLVMTargetDataRef,
     powFunction: c.LLVMValueRef,
     powType: c.LLVMTypeRef,
     idToValue: std.StringHashMap(c.LLVMValueRef),
@@ -22,6 +26,20 @@ pub const Compiler = struct {
     targetTriple: [*c]u8,
     algorithmJ: *AlgorithmJ,
     namesToFree: std.ArrayList([]const u8),
+
+    // User-defined types
+    nameToMonomorphizations: std.StringHashMap(union(enum) {
+        mono: c.LLVMTypeRef,
+        monos: struct {
+            insts: std.ArrayList(Statement.TypeMonomorphization),
+            llvmTypes: std.ArrayList(c.LLVMTypeRef),
+        },
+    }),
+    nameToTagInfo: std.StringHashMap(struct {
+        tag: usize,
+        tagSize: usize,
+        constructType: c.LLVMTypeRef,
+    }),
 
     fn impToLLVMType(self: *Compiler, t: *Type) c.LLVMTypeRef {
         switch (t.data) {
@@ -68,8 +86,26 @@ pub const Compiler = struct {
                 };
                 return c.LLVMStructType(&struct_types, 2, 0);
             },
-            else => {
-                return null;
+            .composite => |comp| {
+                const monos = self.nameToMonomorphizations.get(comp.name).?;
+                switch (monos) {
+                    .mono => |monoType| {
+                        return monoType;
+                    },
+                    .monos => |ms| {
+                        const insts = ms.insts;
+                        const llvmTypes = ms.llvmTypes;
+                        outer: for (insts.items, llvmTypes.items) |inst, llvmType| {
+                            for (inst.inst, comp.args.items) |t1, t2| {
+                                if (!typesEqual(t1, t2)) {
+                                    continue :outer;
+                                }
+                            }
+                            return llvmType;
+                        }
+                        return null;
+                    },
+                }
             },
         }
     }
@@ -534,6 +570,396 @@ pub const Compiler = struct {
         }
     }
 
+    fn containsType(self: *Compiler, typeName: []const u8, t: *Type) bool {
+        switch (t.data) {
+            .typeVar => |tV| {
+                return self.containsType(typeName, tV.subst.?);
+            },
+            .primitive => {
+                return false;
+            },
+            .composite => |comp| {
+                if (std.mem.eql(u8, typeName, comp.name)) {
+                    return true;
+                }
+                for (comp.args.items) |arg| {
+                    if (self.containsType(typeName, arg)) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+            .function => |function| {
+                const containsFrom = self.containsType(typeName, function.from);
+                return containsFrom or self.containsType(typeName, function.to);
+            },
+            .number => {
+                return false;
+            },
+        }
+    }
+
+    fn constructorType(
+        self: *Compiler,
+        typeName: []const u8,
+        constructor: Statement.Constructor,
+    ) !struct { type: c.LLVMTypeRef, args: []c.LLVMTypeRef } {
+        const constructorStructArgs = try self.allocator.alloc(
+            c.LLVMTypeRef,
+            constructor.args.items.len,
+        );
+        errdefer self.allocator.free(constructorStructArgs);
+        for (constructor.args.items, 0..) |arg, i| {
+            if (self.containsType(typeName, arg)) {
+                constructorStructArgs[i] = c.LLVMPointerType(
+                    c.LLVMInt8Type(),
+                    0,
+                );
+                continue;
+            }
+            constructorStructArgs[i] = self.impToLLVMType(arg);
+        }
+        const constructorStruct = c.LLVMStructType(
+            constructorStructArgs.ptr,
+            @intCast(constructorStructArgs.len),
+            0,
+        );
+        return .{ .type = constructorStruct, .args = constructorStructArgs };
+    }
+
+    fn enumType(
+        self: *Compiler,
+        typeName: []const u8,
+        constructors: std.ArrayList(Statement.Constructor),
+    ) !c.LLVMTypeRef {
+        var maxAlignment: c_uint = 0;
+        var maxSize: c_ulonglong = 0;
+        for (constructors.items) |constructor| {
+            const constructorStructAndArgs = try self.constructorType(typeName, constructor);
+            const constructorStruct = constructorStructAndArgs.type;
+            self.allocator.free(constructorStructAndArgs.args);
+            const alignment = c.LLVMABIAlignmentOfType(
+                self.dataLayout,
+                constructorStruct,
+            );
+            const size = c.LLVMABISizeOfType(
+                self.dataLayout,
+                constructorStruct,
+            );
+            if (alignment >= maxAlignment) {
+                maxAlignment = alignment;
+            }
+            if (size > maxSize) {
+                maxSize = size;
+            }
+        }
+        const paddingLength = try std.math.divCeil(
+            c_ulonglong,
+            maxSize,
+            maxAlignment,
+        );
+        const paddingList = c.LLVMArrayType(
+            c.LLVMIntType(maxAlignment * 8),
+            @intCast(paddingLength),
+        );
+        const indexOffset = std.math.log2_int_ceil(
+            usize,
+            constructors.items.len,
+        );
+        const structType = structType: {
+            if (constructors.items.len == 1) {
+                break :structType paddingList;
+            } else {
+                var members = [2]c.LLVMTypeRef{
+                    c.LLVMIntType(@intCast(indexOffset)),
+                    paddingList,
+                };
+                break :structType c.LLVMStructType(&members, 2, 0);
+            }
+        };
+        return structType;
+    }
+
+    fn compileConstructor(
+        self: *Compiler,
+        typeName: []const u8,
+        structType: c.LLVMTypeRef,
+        constructor: Statement.Constructor,
+        constructorNum: usize,
+        numConstructors: usize,
+        originalBB: c.LLVMBasicBlockRef,
+    ) !void {
+        var result: c.LLVMValueRef = undefined;
+        if (constructor.args.items.len == 0) {
+            // Put the number of the constructor in the value (tag)
+            if (numConstructors != 1) {
+                result = c.LLVMBuildInsertValue(
+                    self.builder,
+                    c.LLVMGetUndef(structType),
+                    c.LLVMConstInt(
+                        c.LLVMIntType(@intCast(std.math.log2_int_ceil(
+                            usize,
+                            numConstructors,
+                        ))),
+                        constructorNum,
+                        0,
+                    ),
+                    0,
+                    "",
+                );
+            } else {
+                result = c.LLVMGetUndef(structType);
+            }
+        } else {
+
+            // Create last function responsible for actually creating the value
+            var argTypes = [2]c.LLVMTypeRef{
+                self.impToLLVMType(
+                    constructor.args.items[constructor.args.items.len - 1],
+                ),
+                c.LLVMPointerType(c.LLVMInt8Type(), 0),
+            };
+            var functionType = c.LLVMFunctionType(structType, &argTypes, 2, 0);
+            const originalFunctionType = functionType;
+            const constructorFunctionName = try std.fmt.allocPrint(
+                self.allocator,
+                "fun_{d}",
+                .{self.currentFunction},
+            );
+            self.currentFunction += 1;
+            defer self.allocator.free(constructorFunctionName);
+            var function = c.LLVMAddFunction(self.module, constructorFunctionName.ptr, functionType);
+            var bb = c.LLVMAppendBasicBlock(function, "entry");
+            c.LLVMPositionBuilderAtEnd(self.builder, bb);
+
+            // Reserve space for the value so pointer manipulation can be done
+            const construct = c.LLVMBuildAlloca(self.builder, structType, "");
+
+            const constructorStructAndArgs = try self.constructorType(
+                typeName,
+                constructor,
+            );
+            const constructorStruct = constructorStructAndArgs.type;
+            const constructorStructArgs = constructorStructAndArgs.args;
+            defer self.allocator.free(constructorStructArgs);
+
+            var insertPoint = construct;
+
+            // Put the number of the constructor in the value (tag)
+            // and get the rest to put the actual values
+            if (numConstructors != 1) {
+                _ = c.LLVMBuildStore(
+                    self.builder,
+                    c.LLVMConstInt(
+                        c.LLVMIntType(@intCast(std.math.log2_int_ceil(
+                            usize,
+                            numConstructors,
+                        ))),
+                        constructorNum,
+                        0,
+                    ),
+                    construct,
+                );
+                insertPoint = c.LLVMBuildStructGEP2(
+                    self.builder,
+                    structType,
+                    construct,
+                    1,
+                    "",
+                );
+            }
+
+            // Copy all values over from the bound variable
+            for (0..constructor.args.items.len - 1) |i| {
+                const arg = constructor.args.items[i];
+                const pointer = c.LLVMBuildStructGEP2(
+                    self.builder,
+                    constructorStruct,
+                    c.LLVMGetParam(function, 1),
+                    @intCast(i),
+                    "",
+                );
+                const argType = self.impToLLVMType(arg);
+                const value = c.LLVMBuildLoad2(self.builder, argType, pointer, "");
+                const resultPointer = c.LLVMBuildStructGEP2(
+                    self.builder,
+                    constructorStruct,
+                    insertPoint,
+                    @intCast(i),
+                    "",
+                );
+                _ = c.LLVMBuildStore(
+                    self.builder,
+                    value,
+                    resultPointer,
+                );
+            }
+
+            // Create the pointer where the last value is needed
+            const resultPointer = c.LLVMBuildStructGEP2(
+                self.builder,
+                constructorStruct,
+                insertPoint,
+                @intCast(constructor.args.items.len - 1),
+                "",
+            );
+
+            // Get the value to insert
+            var insertValue = c.LLVMGetParam(function, 0);
+
+            // Allocate memory for the value in case of (optionally wrapped) recursion
+            const typeValue = constructor.args.items[constructor.args.items.len - 1];
+            if (self.containsType(typeName, typeValue)) {
+                const allocInsert = c.LLVMBuildMalloc(self.builder, argTypes[0], "");
+                _ = c.LLVMBuildStore(self.builder, insertValue, allocInsert);
+                insertValue = allocInsert;
+            }
+
+            // Store the last value and return
+            _ = c.LLVMBuildStore(
+                self.builder,
+                insertValue,
+                resultPointer,
+            );
+            _ = c.LLVMBuildRet(self.builder, c.LLVMBuildLoad2(
+                self.builder,
+                structType,
+                construct,
+                "",
+            ));
+
+            // Create the curried functions needed for the constructor
+            for (1..constructor.args.items.len) |i| {
+                // Create the function
+                const prevConstructorFunctionName = try std.fmt.allocPrint(
+                    self.allocator,
+                    "fun_{d}",
+                    .{self.currentFunction},
+                );
+                defer self.allocator.free(prevConstructorFunctionName);
+                self.currentFunction += 1;
+                argTypes[0] = self.impToLLVMType(
+                    constructor.args.items[constructor.args.items.len - i - 1],
+                );
+                var resultVals = [2]c.LLVMTypeRef{
+                    c.LLVMPointerType(functionType, 0),
+                    c.LLVMPointerType(c.LLVMInt8Type(), 0),
+                };
+                const resultType = c.LLVMStructType(&resultVals, 2, 0);
+                functionType = c.LLVMFunctionType(resultType, &argTypes, 2, 0);
+                const prevFunction = function;
+                function = c.LLVMAddFunction(self.module, prevConstructorFunctionName.ptr, functionType);
+                bb = c.LLVMAppendBasicBlock(function, "entry");
+                c.LLVMPositionBuilderAtEnd(self.builder, bb);
+
+                // All previous types are bound
+                const newBoundType = c.LLVMStructType(
+                    constructorStructArgs.ptr,
+                    @intCast(constructor.args.items.len - i),
+                    0,
+                );
+                const newBoundAlign = c.LLVMABIAlignmentOfType(
+                    self.dataLayout,
+                    newBoundType,
+                );
+                const newBound = c.LLVMBuildMalloc(self.builder, newBoundType, "bound");
+                // Unless nothing is bound, copy all bound arguments
+                if (i != constructor.args.items.len - 1) {
+                    const boundType = c.LLVMStructType(
+                        constructorStructArgs.ptr,
+                        @intCast(constructor.args.items.len - i - 1),
+                        0,
+                    );
+                    const boundAlign = c.LLVMABIAlignmentOfType(
+                        self.dataLayout,
+                        boundType,
+                    );
+                    const boundSize = c.LLVMSizeOf(boundType);
+                    _ = c.LLVMBuildMemCpy(
+                        self.builder,
+                        newBound,
+                        newBoundAlign,
+                        c.LLVMGetParam(function, 1),
+                        boundAlign,
+                        boundSize,
+                    );
+                }
+
+                // Put the last value
+                const newBoundElementPtr = c.LLVMBuildStructGEP2(
+                    self.builder,
+                    newBoundType,
+                    newBound,
+                    @intCast(constructor.args.items.len - i - 1),
+                    "",
+                );
+                insertValue = c.LLVMGetParam(function, 0);
+                const newValueType = constructor.args.items[constructor.args.items.len - i - 1];
+                if (self.containsType(typeName, newValueType)) {
+                    const allocInsert = c.LLVMBuildMalloc(self.builder, argTypes[0], "");
+                    _ = c.LLVMBuildStore(self.builder, insertValue, allocInsert);
+                    insertValue = allocInsert;
+                }
+                _ = c.LLVMBuildStore(
+                    self.builder,
+                    insertValue,
+                    newBoundElementPtr,
+                );
+
+                // Create the closure
+                var clos = c.LLVMBuildInsertValue(
+                    self.builder,
+                    c.LLVMGetUndef(resultType),
+                    prevFunction,
+                    0,
+                    "",
+                );
+                clos = c.LLVMBuildInsertValue(
+                    self.builder,
+                    clos,
+                    newBound,
+                    1,
+                    "clos",
+                );
+                _ = c.LLVMBuildRet(self.builder, clos);
+            }
+
+            // Create the final closure
+            c.LLVMPositionBuilderAtEnd(self.builder, originalBB);
+            var closElements = [2]c.LLVMTypeRef{
+                c.LLVMPointerType(originalFunctionType, 0),
+                c.LLVMPointerType(c.LLVMInt8Type(), 0),
+            };
+            const closType = c.LLVMStructType(&closElements, 2, 0);
+            var clos = c.LLVMBuildInsertValue(
+                self.builder,
+                c.LLVMGetUndef(closType),
+                function,
+                0,
+                "",
+            );
+            clos = c.LLVMBuildInsertValue(
+                self.builder,
+                clos,
+                // Constructors never bind a value if not partially instantiated
+                c.LLVMConstNull(c.LLVMPointerType(c.LLVMInt8Type(), 0)),
+                1,
+                "",
+            );
+            result = clos;
+        }
+
+        try self.idToValue.put(constructor.name.lexeme, result);
+        try self.nameToTagInfo.put(constructor.name.lexeme, .{
+            .tag = constructorNum,
+            .tagSize = @intCast(std.math.log2_int_ceil(
+                usize,
+                numConstructors,
+            )),
+            .constructType = structType,
+        });
+    }
+
     pub fn compile(self: *Compiler, statements: *std.ArrayList(Statement)) !void {
         for (statements.items) |statement| {
             switch (statement) {
@@ -551,13 +977,71 @@ pub const Compiler = struct {
                         try self.namesToFree.appendSlice(names.items);
                     }
                 },
-                // TODO
-                .type => {},
+                .type => |t| {
+                    if (t.monomorphizations) |monos| {
+                        var structTypes = try std.ArrayList(c.LLVMTypeRef).initCapacity(
+                            self.allocator,
+                            monos.items.len,
+                        );
+                        errdefer structTypes.deinit();
+                        for (monos.items) |mono| {
+                            const structType = try self.enumType(
+                                t.name.lexeme,
+                                mono.constructors,
+                            );
+                            try structTypes.append(structType);
+                        }
+                        try self.nameToMonomorphizations.put(
+                            t.name.lexeme,
+                            .{ .monos = .{ .insts = monos, .llvmTypes = structTypes } },
+                        );
+                        for (monos.items, structTypes.items) |mono, structType| {
+                            const originalBB = c.LLVMGetInsertBlock(self.builder);
+                            for (mono.constructors.items, 0..) |constructor, constructorNum| {
+                                try self.compileConstructor(
+                                    t.name.lexeme,
+                                    structType,
+                                    constructor,
+                                    constructorNum,
+                                    mono.constructors.items.len,
+                                    originalBB,
+                                );
+                            }
+                        }
+                    } else {
+                        const structType = try self.enumType(
+                            t.name.lexeme,
+                            t.constructors,
+                        );
+                        try self.nameToMonomorphizations.put(
+                            t.name.lexeme,
+                            .{ .mono = structType },
+                        );
+                        const originalBB = c.LLVMGetInsertBlock(self.builder);
+                        for (t.constructors.items, 0..) |constructor, constructorNum| {
+                            try self.compileConstructor(
+                                t.name.lexeme,
+                                structType,
+                                constructor,
+                                constructorNum,
+                                t.constructors.items.len,
+                                originalBB,
+                            );
+                        }
+                    }
+                },
             }
         }
     }
 
-    pub fn init(allocator: std.mem.Allocator, algorithmJ: *AlgorithmJ) Compiler {
+    const initError = error{TargetError};
+
+    pub fn init(allocator: std.mem.Allocator, algorithmJ: *AlgorithmJ) !Compiler {
+        c.LLVMInitializeAllTargetInfos();
+        c.LLVMInitializeAllTargets();
+        c.LLVMInitializeAllTargetMCs();
+        c.LLVMInitializeAllAsmParsers();
+        c.LLVMInitializeAllAsmPrinters();
         const context = c.LLVMContextCreate();
         const module = c.LLVMModuleCreateWithNameInContext("Imp", context);
         const targetTriple = c.LLVMGetDefaultTargetTriple();
@@ -568,6 +1052,22 @@ pub const Compiler = struct {
         const topLevelBlock = c.LLVMAppendBasicBlock(topLevel, "entry");
         const builder = c.LLVMCreateBuilderInContext(context);
         c.LLVMPositionBuilderAtEnd(builder, topLevelBlock);
+        var target: c.LLVMTargetRef = undefined;
+        var errRef: [*c]u8 = undefined;
+        const result = c.LLVMGetTargetFromTriple(targetTriple, &target, &errRef);
+        if (result != 0) {
+            return error.TargetError;
+        }
+        const targetMachine = c.LLVMCreateTargetMachine(
+            target,
+            targetTriple,
+            "generic",
+            "",
+            c.LLVMCodeGenLevelDefault,
+            c.LLVMRelocDefault,
+            c.LLVMCodeModelDefault,
+        );
+        const dataLayout = c.LLVMCreateTargetDataLayout(targetMachine);
         var param_types = [2]c.LLVMTypeRef{ c.LLVMDoubleType(), c.LLVMDoubleType() };
         const fn_type = c.LLVMFunctionType(c.LLVMDoubleType(), &param_types, 2, 0);
         const pow_intrinsic = c.LLVMAddFunction(module, "llvm.pow.f64", fn_type);
@@ -576,11 +1076,15 @@ pub const Compiler = struct {
             .module = module,
             .builder = builder,
             .function = topLevel,
+            .targetMachine = targetMachine,
+            .dataLayout = dataLayout,
             .powFunction = pow_intrinsic,
             .powType = fn_type,
             .idToValue = .init(allocator),
             .idToFunctionNumber = .init(allocator),
             .namesToFree = .init(allocator),
+            .nameToMonomorphizations = .init(allocator),
+            .nameToTagInfo = .init(allocator),
             .currentFunction = 0,
             .allocator = allocator,
             .targetTriple = targetTriple,
@@ -589,6 +1093,8 @@ pub const Compiler = struct {
     }
 
     pub fn deinit(self: *Compiler) void {
+        c.LLVMDisposeTargetData(self.dataLayout);
+        c.LLVMDisposeTargetMachine(self.targetMachine);
         c.LLVMDisposeBuilder(self.builder);
         c.LLVMDisposeModule(self.module);
         c.LLVMContextDispose(self.context);
@@ -600,5 +1106,16 @@ pub const Compiler = struct {
             self.allocator.free(name);
         }
         self.namesToFree.deinit();
+        self.nameToTagInfo.deinit();
+        var iterator = self.nameToMonomorphizations.valueIterator();
+        while (iterator.next()) |val| {
+            switch (val.*) {
+                .monos => |monos| {
+                    monos.llvmTypes.deinit();
+                },
+                else => {},
+            }
+        }
+        self.nameToMonomorphizations.deinit();
     }
 };

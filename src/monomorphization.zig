@@ -5,6 +5,7 @@ const TypeScheme = type_inference.TypeScheme;
 const Forall = type_inference.Forall;
 const AST = @import("ast.zig").AST;
 const Statement = @import("ast.zig").Statement;
+const Pattern = @import("ast.zig").Pattern;
 
 const MultiSubstitution = struct {
     variables: []usize,
@@ -95,7 +96,6 @@ pub const Monomorphizer = struct {
                         .type => {},
                     }
                 },
-                // TODO
                 .type => {},
             }
         }
@@ -158,8 +158,12 @@ pub const Monomorphizer = struct {
                 instantiateFreeVars(op.argType.?, boundVars);
                 try instantiateAST(op.expr, boundVars);
             },
-            // TODO
-            .case => {},
+            .case => |case| {
+                try instantiateAST(case.value, boundVars);
+                for (case.bodies.items) |body| {
+                    try instantiateAST(body, boundVars);
+                }
+            },
             .list => {},
         }
     }
@@ -209,11 +213,11 @@ pub const Monomorphizer = struct {
                 );
             },
             .composite => |composite| {
-                for (composite.args.items, 0..) |arg, i| {
+                for (composite.args.items, t.data.composite.args.items) |arg1, arg2| {
                     self.getInstantiation(
                         forallVars,
-                        arg,
-                        composite.args.items[i],
+                        arg1,
+                        arg2,
                         setInstantiations,
                     );
                 }
@@ -268,8 +272,31 @@ pub const Monomorphizer = struct {
                     try self.idToInstantiations.put(let.name.lexeme, &let.instantiations.?);
                     try self.idToTypeScheme.put(let.name.lexeme, let.actualType.?);
                 },
-                // TODO
-                .type => {},
+                .type => |*t| {
+                    const constructorInsts = try self.allocator.alloc(
+                        std.ArrayList([]*Type),
+                        t.constructors.items.len,
+                    );
+                    errdefer self.allocator.free(constructorInsts);
+                    var i: usize = 0;
+                    {
+                        errdefer for (0..i) |j| {
+                            constructorInsts[j].deinit();
+                        };
+                        while (i < constructorInsts.len) : (i += 1) {
+                            constructorInsts[i] = .init(self.allocator);
+                            try self.idToInstantiations.put(
+                                t.constructors.items[i].name.lexeme,
+                                &constructorInsts[i],
+                            );
+                            try self.idToTypeScheme.put(
+                                t.constructors.items[i].name.lexeme,
+                                t.constructorTypeSchemes.?.items[i],
+                            );
+                        }
+                    }
+                    t.constructorInstantiations = constructorInsts;
+                },
             }
         }
         for (0..file.items.len) |i| {
@@ -284,10 +311,66 @@ pub const Monomorphizer = struct {
                         &let.monomorphizations,
                     );
                 },
-                // TODO
-                .type => {},
+                .type => |*t| {
+                    if (t.typeArgs.items.len != 0) {
+                        t.monomorphizations = .init(self.allocator);
+                        for (t.constructorInstantiations.?, 0..) |insts, j| {
+                            const variables = t.constructorTypeSchemes.?.items[j].*.forall.typeVars.keys();
+                            instLoop: for (insts.items, 0..) |inst, k| {
+                                var monoConstructor = try self.monomorphizeConstructor(
+                                    t.constructors.items[j],
+                                    variables,
+                                    inst,
+                                );
+                                monoConstructor.name.lexeme = try std.fmt.allocPrint(
+                                    self.allocator,
+                                    "_{d}{s}",
+                                    .{ k, monoConstructor.name.lexeme },
+                                );
+                                errdefer self.allocator.free(monoConstructor.name.lexeme);
+                                errdefer monoConstructor.args.deinit();
+                                errdefer for (monoConstructor.args.items) |arg| {
+                                    arg.deinit(self.allocator);
+                                };
+                                monoLoop: for (t.monomorphizations.?.items) |*monomorphization| {
+                                    for (inst, monomorphization.inst) |t1, t2| {
+                                        if (!typesEqual(t1, t2)) {
+                                            continue :monoLoop;
+                                        }
+                                    }
+                                    try monomorphization.constructors.append(monoConstructor);
+                                    continue :instLoop;
+                                }
+                                var constructors = std.ArrayList(Statement.Constructor).init(self.allocator);
+                                try constructors.append(monoConstructor);
+                                try t.monomorphizations.?.append(.{
+                                    .inst = inst,
+                                    .constructors = constructors,
+                                });
+                            }
+                        }
+                    }
+                },
             }
         }
+    }
+
+    fn monomorphizeConstructor(
+        self: *Monomorphizer,
+        constructor: Statement.Constructor,
+        variables: []usize,
+        groundTypes: []*Type,
+    ) !Statement.Constructor {
+        var newArgs = try std.ArrayList(*Type).initCapacity(
+            self.allocator,
+            constructor.args.items.len,
+        );
+        for (constructor.args.items) |arg| {
+            const monoArg = try self.monomorphizeType(arg, variables, groundTypes);
+            errdefer monoArg.deinit(self.allocator);
+            try newArgs.append(monoArg);
+        }
+        return .{ .name = constructor.name, .args = newArgs };
     }
 
     pub fn monomorphizeExpr(self: *Monomorphizer, expr: *AST) anyerror!void {
@@ -321,6 +404,9 @@ pub const Monomorphizer = struct {
                                 "_{d}{s}",
                                 .{ index, id.token.lexeme },
                             );
+                            if (present) {
+                                self.allocator.free(types);
+                            }
                         },
                         else => {},
                     }
@@ -361,8 +447,13 @@ pub const Monomorphizer = struct {
                 try self.monomorphizeExpr(ifExpr.thenExpr);
                 try self.monomorphizeExpr(ifExpr.predicate);
             },
-            // TODO
-            .case, .list => {},
+            .case => |case| {
+                try self.monomorphizeExpr(case.value);
+                for (case.bodies.items) |body| {
+                    try self.monomorphizeExpr(body);
+                }
+            },
+            .list => {},
         }
     }
 
@@ -555,8 +646,68 @@ pub const Monomorphizer = struct {
                     .argType = copiedType,
                 } };
             },
-            // TODO
-            .case, .list => {},
+            .case => |case| {
+                const copiedValue = try self.monomorphizeAST(case.value, variables, groundTypes);
+                errdefer copiedValue.deinit(self.allocator);
+                var copiedPatterns = try std.ArrayList(Pattern).initCapacity(
+                    self.allocator,
+                    case.patterns.items.len,
+                );
+                errdefer copiedPatterns.deinit();
+                errdefer for (copiedPatterns.items) |pattern| {
+                    pattern.values.deinit();
+                    for (pattern.types.?.items) |t| {
+                        t.deinit(self.allocator);
+                    }
+                    pattern.types.?.deinit();
+                };
+                for (case.patterns.items) |pattern| {
+                    const copiedValues = try pattern.values.clone();
+                    errdefer copiedValues.deinit();
+                    var copiedTypes = try std.ArrayList(*Type).initCapacity(
+                        self.allocator,
+                        copiedValues.items.len,
+                    );
+                    errdefer copiedTypes.deinit();
+                    errdefer for (copiedTypes.items) |t| {
+                        t.deinit(self.allocator);
+                    };
+                    for (pattern.types.?.items) |t| {
+                        const copiedType = try self.monomorphizeType(t, variables, groundTypes);
+                        errdefer copiedType.deinit(self.allocator);
+                        try copiedTypes.append(copiedType);
+                    }
+                    try copiedPatterns.append(.{
+                        .name = pattern.name,
+                        .values = copiedValues,
+                        .types = copiedTypes,
+                    });
+                }
+                var copiedBodies = try std.ArrayList(*AST).initCapacity(
+                    self.allocator,
+                    case.bodies.items.len,
+                );
+                errdefer copiedBodies.deinit();
+                errdefer for (copiedBodies.items) |body| {
+                    body.deinit(self.allocator);
+                };
+                for (case.bodies.items) |body| {
+                    const copiedBody = try self.monomorphizeAST(
+                        body,
+                        variables,
+                        groundTypes,
+                    );
+                    errdefer copiedBody.deinit(self.allocator);
+                    try copiedBodies.append(copiedBody);
+                }
+                copiedAST.* = .{ .case = .{
+                    .start = case.start,
+                    .value = copiedValue,
+                    .patterns = copiedPatterns,
+                    .bodies = copiedBodies,
+                } };
+            },
+            .list => {},
         }
         return copiedAST;
     }
@@ -677,7 +828,7 @@ pub const Monomorphizer = struct {
         return copiedTypes;
     }
 
-    fn typesEqual(left: *Type, right: *Type) bool {
+    pub fn typesEqual(left: *Type, right: *Type) bool {
         switch (right.data) {
             .typeVar => |tV1| {
                 if (tV1.subst) |subst| {

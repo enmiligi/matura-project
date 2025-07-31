@@ -1416,7 +1416,7 @@ pub const AlgorithmJ = struct {
                 const resultType = try Type.init(self.allocator);
                 resultType.* = self.newVarT();
                 errdefer resultType.deinit(self.allocator);
-                for (case.patterns.items, case.bodies.items) |pattern, body| {
+                for (case.patterns.items, case.bodies.items) |*pattern, body| {
                     const constructorType = switch (self.globalTypes.get(pattern.name.lexeme).?.*) {
                         .forall => |forall| forall.type,
                         .type => |exactType| exactType,
@@ -1424,6 +1424,14 @@ pub const AlgorithmJ = struct {
                     const substitutedType = try self.copyAndReplace(constructorType, &instantiatedVars, &copyMap);
                     defer substitutedType.deinit(self.allocator);
                     var constrType = substitutedType;
+                    var matchedTypes = try std.ArrayList(*Type).initCapacity(
+                        self.allocator,
+                        pattern.values.items.len,
+                    );
+                    errdefer matchedTypes.deinit();
+                    errdefer for (matchedTypes.items) |matchedType| {
+                        matchedType.deinit(self.allocator);
+                    };
                     for (pattern.values.items) |value| {
                         switch (constrType.data) {
                             .composite => {
@@ -1450,12 +1458,25 @@ pub const AlgorithmJ = struct {
                                 valueScheme.* = .{ .type = func.from };
                                 func.from.rc += 1;
                                 try self.globalTypes.put(value.lexeme, valueScheme);
+                                func.from.rc += 1;
+                                try matchedTypes.append(func.from);
                                 constrType = func.to;
                             },
                             else => {
                                 unreachable;
                             },
                         }
+                    }
+                    switch (constrType.data) {
+                        .composite => {},
+                        else => {
+                            try self.errors.errorAt(
+                                pattern.name.start,
+                                pattern.name.end,
+                                "Too few arguments given to the constructor.",
+                                .{},
+                            );
+                        },
                     }
                     const bodyType = try self.run(body);
                     defer bodyType.deinit(self.allocator);
@@ -1487,6 +1508,7 @@ pub const AlgorithmJ = struct {
                             return err;
                         },
                     };
+                    pattern.types = matchedTypes;
                 }
                 return resultType;
             },
@@ -1554,9 +1576,10 @@ pub const AlgorithmJ = struct {
                 let.actualType = t;
                 try self.globalTypes.put(let.name.lexeme, t);
             },
-            .type => |typeDecl| {
+            .type => |*typeDecl| {
                 const prevDepth = self.depth;
                 self.depth = std.math.maxInt(usize);
+                typeDecl.constructorTypeSchemes = .init(self.allocator);
                 for (typeDecl.constructors.items) |constructor| {
                     if (self.globalTypes.contains(constructor.name.lexeme)) {
                         try self.errors.errorAt(
@@ -1579,9 +1602,26 @@ pub const AlgorithmJ = struct {
                         } };
                         currentType = functionType;
                     }
-                    const constructorType = try self.generalise(currentType, 0);
-                    try self.globalTypes.put(constructor.name.lexeme, constructorType);
+                    const constructorType = try self.allocator.create(TypeScheme);
+                    errdefer self.allocator.destroy(constructorType);
+                    if (typeDecl.typeArgs.items.len != 0) {
+                        var typeVarSet: TypeVarSet = .init(self.allocator);
+                        errdefer typeVarSet.deinit();
+                        for (typeDecl.typeArgs.items) |t| {
+                            try typeVarSet.put(t.data.typeVar.n, undefined);
+                        }
+
+                        constructorType.* = .{ .forall = .{
+                            .typeVars = typeVarSet,
+                            .type = currentType,
+                        } };
+                    } else {
+                        constructorType.* = .{ .type = currentType };
+                    }
+                    errdefer constructorType.forall.typeVars.deinit();
                     try self.constructorToType.put(constructor.name.lexeme, typeDecl.name.lexeme);
+                    try typeDecl.constructorTypeSchemes.?.append(constructorType);
+                    try self.globalTypes.put(constructor.name.lexeme, constructorType);
                 }
                 self.depth = prevDepth;
             },

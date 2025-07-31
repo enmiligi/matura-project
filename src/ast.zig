@@ -16,6 +16,7 @@ pub const TypeAnnotation = struct {
 pub const Pattern = struct {
     name: token.Token,
     values: std.ArrayList(token.Token),
+    types: ?std.ArrayList(*Type) = null,
 
     pub fn print(self: *Pattern, writer: std.io.AnyWriter) !void {
         try writer.print("{s}", .{self.name.lexeme});
@@ -24,8 +25,14 @@ pub const Pattern = struct {
         }
     }
 
-    pub fn deinit(self: *Pattern) void {
+    pub fn deinit(self: *Pattern, allocator: std.mem.Allocator) void {
         self.values.deinit();
+        if (self.types) |types| {
+            for (types.items) |t| {
+                t.deinit(allocator);
+            }
+            types.deinit();
+        }
     }
 };
 
@@ -204,7 +211,7 @@ pub const AST = union(enum) {
             .case => |case| {
                 case.value.deinit(allocator);
                 for (case.patterns.items) |*pattern| {
-                    pattern.deinit();
+                    pattern.deinit(allocator);
                 }
                 case.patterns.deinit();
                 for (case.bodies.items) |body| {
@@ -352,6 +359,11 @@ pub const Statement = union(enum) {
         args: std.ArrayList(*Type),
     };
 
+    pub const TypeMonomorphization = struct {
+        inst: []*Type,
+        constructors: std.ArrayList(Constructor),
+    };
+
     let: struct {
         name: token.Token,
         be: *AST,
@@ -365,7 +377,11 @@ pub const Statement = union(enum) {
     type: struct {
         name: token.Token,
         compositeType: *Type,
+        typeArgs: std.ArrayList(*type_inference.Type),
         constructors: std.ArrayList(Constructor),
+        constructorTypeSchemes: ?std.ArrayList(*TypeScheme) = null,
+        constructorInstantiations: ?[]std.ArrayList([]*Type) = null,
+        monomorphizations: ?std.ArrayList(TypeMonomorphization) = null,
     },
 
     // Recursively destroy all contained ASTs
@@ -398,6 +414,31 @@ pub const Statement = union(enum) {
                 }
                 t.constructors.deinit();
                 t.compositeType.deinit(allocator);
+                if (t.constructorInstantiations) |constructorInsts| {
+                    for (constructorInsts) |insts| {
+                        for (insts.items) |inst| {
+                            allocator.free(inst);
+                        }
+                        insts.deinit();
+                    }
+                    allocator.free(constructorInsts);
+                }
+                if (t.constructorTypeSchemes) |tSs| {
+                    tSs.deinit();
+                }
+                if (t.monomorphizations) |monos| {
+                    for (monos.items) |mono| {
+                        for (mono.constructors.items) |constructor| {
+                            allocator.free(constructor.name.lexeme);
+                            for (constructor.args.items) |arg| {
+                                arg.deinit(allocator);
+                            }
+                            constructor.args.deinit();
+                        }
+                        mono.constructors.deinit();
+                    }
+                    monos.deinit();
+                }
             },
         }
     }
