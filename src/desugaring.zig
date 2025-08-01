@@ -8,12 +8,15 @@ pub const ConvertList = struct {
         switch (ast.*) {
             .list => |list| {
                 var listExpr = try allocator.create(AST);
-                listExpr.* = .{ .identifier = .{ .token = .{
-                    .start = list.start,
-                    .end = list.end,
-                    .lexeme = "Nil",
-                    .type = .Identifier,
-                } } };
+                listExpr.* = .{ .identifier = .{
+                    .token = .{
+                        .start = list.start,
+                        .end = list.end,
+                        .lexeme = "Nil",
+                        .type = .Identifier,
+                    },
+                    .idType = list.nilType,
+                } };
                 errdefer listExpr.deinit(allocator);
 
                 for (list.values.items) |value| {
@@ -22,12 +25,16 @@ pub const ConvertList = struct {
 
                 for (1..list.values.items.len + 1) |i| {
                     const cons = try allocator.create(AST);
-                    cons.* = .{ .identifier = .{ .token = .{
-                        .start = list.start,
-                        .end = list.end,
-                        .lexeme = "Cons",
-                        .type = .Identifier,
-                    } } };
+                    list.consType.?.rc += 1;
+                    cons.* = .{ .identifier = .{
+                        .token = .{
+                            .start = list.start,
+                            .end = list.end,
+                            .lexeme = "Cons",
+                            .type = .Identifier,
+                        },
+                        .idType = list.consType,
+                    } };
                     errdefer cons.deinit(allocator);
                     const firstCall = try allocator.create(AST);
                     firstCall.* = .{ .call = .{
@@ -43,6 +50,7 @@ pub const ConvertList = struct {
                     listExpr = secondCall;
                 }
                 list.values.deinit();
+                list.consType.?.deinit(allocator);
                 ast.* = listExpr.*;
                 allocator.destroy(listExpr);
             },

@@ -1513,9 +1513,9 @@ pub const AlgorithmJ = struct {
                 case.resultType = resultType;
                 return resultType;
             },
-            .list => |list| {
+            .list => |*list| {
                 t.* = self.newVarT();
-                errdefer t.deinit(self.allocator);
+                defer t.deinit(self.allocator);
                 for (list.values.items, 0..) |value, i| {
                     const typeOfVal = try self.run(value);
                     defer typeOfVal.deinit(self.allocator);
@@ -1558,6 +1558,23 @@ pub const AlgorithmJ = struct {
                     .name = "List",
                     .args = listArgs,
                 } };
+                t.rc += 1;
+                errdefer listType.deinit(self.allocator);
+                const instantiatedCons = try self.instantiate(
+                    &self.globalTypes.get("Cons").?.forall,
+                );
+                errdefer instantiatedCons.deinit(self.allocator);
+                try self.unify(
+                    instantiatedCons.data.function.from,
+                    t,
+                );
+                const instantiatedNil = try self.instantiate(
+                    &self.globalTypes.get("Nil").?.forall,
+                );
+                errdefer instantiatedNil.deinit(self.allocator);
+                try self.unify(instantiatedNil, listType);
+                list.nilType = instantiatedNil;
+                list.consType = instantiatedCons;
                 return listType;
             },
             .lambdaMult => {},

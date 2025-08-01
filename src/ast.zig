@@ -125,6 +125,8 @@ pub const AST = union(enum) {
         start: usize,
         end: usize,
         values: std.ArrayList(*AST),
+        nilType: ?*Type = null,
+        consType: ?*Type = null,
     },
 
     // Recursively destroy all contained ASTs
@@ -232,6 +234,12 @@ pub const AST = union(enum) {
                     value.deinit(allocator);
                 }
                 list.values.deinit();
+                if (list.nilType) |nilType| {
+                    nilType.deinit(allocator);
+                }
+                if (list.consType) |consType| {
+                    consType.deinit(allocator);
+                }
             },
             .identifier => |id| {
                 if (id.idType) |t| {
