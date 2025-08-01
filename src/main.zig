@@ -228,62 +228,16 @@ pub fn main() !u8 {
         return returnCode;
     }
 
-    if (try fileRunner.checkStatements(&algorithmJ, &errbw, true)) |returnCode| {
+    if (try fileRunner.checkStatements(
+        &algorithmJ,
+        &errs,
+        stderr.any(),
+        &errbw,
+    )) |returnCode| {
         return returnCode;
     }
 
-    // Check that a main function exists and has the type Void -> Void
-    if (algorithmJ.globalTypes.get("main") == null) {
-        try errs.printError("No 'main' defined", .{});
-        try errbw.flush();
-        return 1;
-    }
-
-    const vType = try type_inference.Type.init(allocator);
-    vType.data = .{ .composite = .{ .name = "Void", .args = .init(allocator) } };
-    const fType = type_inference.Type.init(allocator) catch |err| {
-        vType.deinit(allocator);
-        return err;
-    };
-    vType.rc += 1;
-    fType.data = .{ .function = .{
-        .from = vType,
-        .to = vType,
-    } };
-    defer fType.deinit(allocator);
-
-    var mainType: *type_inference.Type = undefined;
-    switch (algorithmJ.globalTypes.get("main").?.*) {
-        .type => |t| {
-            t.rc += 1;
-            mainType = t;
-        },
-        .forall => |*forall| mainType = try algorithmJ.instantiate(forall),
-    }
-    defer mainType.deinit(allocator);
-
-    algorithmJ.unify(mainType, fType) catch |err| switch (err) {
-        error.CouldNotUnify => {
-            try stderr.print("The main function should have type Void -> Void, but it has type ", .{});
-            var currentTypeVar: usize = 0;
-            var typeVarMap = std.AutoHashMap(usize, usize).init(allocator);
-            defer typeVarMap.deinit();
-
-            try type_inference.printType(
-                mainType,
-                stderr.any(),
-                &currentTypeVar,
-                &typeVarMap,
-                true,
-                allocator,
-            );
-            try errbw.flush();
-            return 1;
-        },
-        else => {
-            return err;
-        },
-    };
+    try fileRunner.optimize(true);
 
     if (try fileRunner.run(&interpreter_, &errbw)) |returnCode| {
         return returnCode;
