@@ -1232,6 +1232,14 @@ pub const Interpreter = struct {
             .lexeme = "Void",
             .type = .Identifier,
         } } };
-        _ = try self.evalCall(self.lookup("main").?, voidAst, false);
+        const todo = try self.evalCall(self.lookup("main").?, voidAst, true);
+        switch (todo) {
+            .value => {
+                return;
+            },
+            .ast => |toEval| {
+                _ = try self.eval(toEval, true);
+            },
+        }
     }
 };

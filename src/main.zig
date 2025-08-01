@@ -9,6 +9,7 @@ pub const interpreter = @import("./interpreter.zig");
 pub const value = @import("./value.zig");
 pub const errors = @import("./errors.zig");
 pub const optimizer = @import("./optimizer.zig");
+pub const desugaring = @import("desugaring.zig");
 pub const runner = @import("./runner.zig");
 pub const compiler = @import("compiler.zig");
 pub const monomorphization = @import("monomorphization.zig");
@@ -98,6 +99,7 @@ pub fn main() !u8 {
     }
 
     for (statements.items) |*statement| {
+        try desugaring.desugarStatement(statement, allocator);
         try algorithmJ.checkStatement(statement);
     }
 
@@ -109,7 +111,7 @@ pub fn main() !u8 {
     try monomorphizer.monomorphize(&statements);
 
     for (statements.items) |*statement| {
-        try optimizer.optimizeStatement(statement, allocator);
+        try optimizer.optimizeStatement(statement, allocator, false);
     }
 
     _ = try compiler_.compile(&statements);
@@ -147,12 +149,11 @@ pub fn main() !u8 {
                 "../lib/matura-project/builtin",
                 builtinFile.name,
             });
-            if (try fileRunner.runFile(
+            if (try fileRunner.appendFile(
                 f,
                 fileName,
                 &fileParser,
                 &algorithmJ,
-                &interpreter_,
                 &errs,
                 &errbw,
             )) |returnCode| {
@@ -185,12 +186,11 @@ pub fn main() !u8 {
                 "../lib/matura-project/stdlib",
                 libFile.name,
             });
-            if (try fileRunner.runFile(
+            if (try fileRunner.appendFile(
                 f,
                 fileName,
                 &fileParser,
                 &algorithmJ,
-                &interpreter_,
                 &errs,
                 &errbw,
             )) |returnCode| {
@@ -217,15 +217,18 @@ pub fn main() !u8 {
     const fileName = try std.fs.path.resolve(allocator, &.{consoleArgs[1]});
 
     // Run the file
-    if (try fileRunner.runFile(
+    if (try fileRunner.appendFile(
         file,
         fileName,
         &fileParser,
         &algorithmJ,
-        &interpreter_,
         &errs,
         &errbw,
     )) |returnCode| {
+        return returnCode;
+    }
+
+    if (try fileRunner.checkStatements(&algorithmJ, &errbw, true)) |returnCode| {
         return returnCode;
     }
 
@@ -281,6 +284,10 @@ pub fn main() !u8 {
             return err;
         },
     };
+
+    if (try fileRunner.run(&interpreter_, &errbw)) |returnCode| {
+        return returnCode;
+    }
 
     // Run the main function
     interpreter_.runMain() catch |err| switch (err) {

@@ -934,7 +934,6 @@ pub const AlgorithmJ = struct {
             typeOfVar.deinit(self.allocator);
             return err;
         };
-        errdefer typeOfVar.deinit(self.allocator);
         return generalised;
     }
 

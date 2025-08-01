@@ -281,10 +281,7 @@ pub const Parser = struct {
         return currentType;
     }
 
-    // file ::= statement*
-    pub fn file(self: *Parser) !std.ArrayList(Statement) {
-        var statements = std.ArrayList(Statement).init(self.allocator);
-        errdefer Statement.deinitStatements(statements, self.allocator);
+    pub fn appendFile(self: *Parser, statements: *std.ArrayList(Statement)) !void {
         while (self.peekToken().type != .EOF) {
             const stmt = try self.statement();
             try statements.append(stmt);
@@ -304,6 +301,13 @@ pub const Parser = struct {
                 },
             }
         }
+    }
+
+    // file ::= statement*
+    pub fn file(self: *Parser) !std.ArrayList(Statement) {
+        var statements = std.ArrayList(Statement).init(self.allocator);
+        errdefer Statement.deinitStatements(statements, self.allocator);
+        try self.appendFile(&statements);
         return statements;
     }
 

@@ -5,10 +5,12 @@ const interpreter = @import("interpreter.zig");
 const errors = @import("errors.zig");
 const ast = @import("ast.zig");
 const optimizer = @import("optimizer.zig");
+const desugaring = @import("desugaring.zig");
 
 pub const Runner = struct {
     sources: std.ArrayList([]const u8),
-    statements: std.ArrayList(std.ArrayList(ast.Statement)),
+    statements: std.ArrayList(ast.Statement),
+    startOfFiles: std.ArrayList(usize),
     fileNames: std.ArrayList([]const u8),
     allocator: std.mem.Allocator,
 
@@ -17,15 +19,13 @@ pub const Runner = struct {
             .sources = .init(allocator),
             .statements = .init(allocator),
             .fileNames = .init(allocator),
+            .startOfFiles = .init(allocator),
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Runner) void {
-        for (self.statements.items) |statements| {
-            ast.Statement.deinitStatements(statements, self.allocator);
-        }
-        self.statements.deinit();
+        ast.Statement.deinitStatements(self.statements, self.allocator);
         for (self.sources.items) |source| {
             self.allocator.free(source);
         }
@@ -34,20 +34,21 @@ pub const Runner = struct {
             self.allocator.free(fileName);
         }
         self.fileNames.deinit();
+        self.startOfFiles.deinit();
     }
 
-    pub fn runFile(
+    pub fn appendFile(
         self: *Runner,
         file: std.fs.File,
         fileName: []const u8,
         fileParser: *parser.Parser,
         algorithmJ: *type_inference.AlgorithmJ,
-        interpreter_: *interpreter.Interpreter,
         errs: *errors.Errors,
         errbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
     ) !?u8 {
         // The file name has been allocated and needs to be freed
         try self.fileNames.append(fileName);
+        try self.startOfFiles.append(self.statements.items.len);
         const fileContents = try file.readToEndAlloc(self.allocator, std.math.maxInt(usize));
         {
             errdefer self.allocator.free(fileContents);
@@ -60,7 +61,7 @@ pub const Runner = struct {
         // Set the depth to max to ensure that parsed annotations don't prevent generalization
         algorithmJ.depth = std.math.maxInt(usize);
         // Parse the file
-        const statements = fileParser.file() catch |err| switch (err) {
+        fileParser.appendFile(&self.statements) catch |err| switch (err) {
             error.InvalidChar, error.UnexpectedToken, error.InvalidPrefix => {
                 try errbw.flush();
                 return 1;
@@ -69,14 +70,18 @@ pub const Runner = struct {
                 return err;
             },
         };
-        self.statements.append(statements) catch |err| {
-            ast.Statement.deinitStatements(statements, self.allocator);
-            return err;
-        };
         algorithmJ.depth = 0;
+        return null;
+    }
 
+    pub fn checkStatements(
+        self: *Runner,
+        algorithmJ: *type_inference.AlgorithmJ,
+        errbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
+        interpreted: bool,
+    ) !?u8 {
         // Type check the statements
-        for (statements.items) |*statement| {
+        for (self.statements.items) |*statement| {
             algorithmJ.checkStatement(statement) catch |err| switch (err) {
                 error.UnknownIdentifier,
                 error.CouldNotUnify,
@@ -91,12 +96,39 @@ pub const Runner = struct {
                     return err;
                 },
             };
-            try optimizer.optimizeStatement(statement, self.allocator);
+            try desugaring.desugarStatement(statement, self.allocator);
+            try optimizer.optimizeStatement(statement, self.allocator, interpreted);
         }
 
-        // Interpret the new file
-        interpreter_.newFile(fileName);
-        for (statements.items) |statement| {
+        return null;
+    }
+
+    pub fn run(
+        self: *Runner,
+        interpreter_: *interpreter.Interpreter,
+        errbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
+    ) !?u8 {
+        var startOfNextFile: usize = undefined;
+        if (self.startOfFiles.items.len > 1) {
+            startOfNextFile = self.startOfFiles.items[1];
+        } else {
+            startOfNextFile = std.math.maxInt(usize);
+        }
+        var fileIndex: usize = 0;
+        if (self.startOfFiles.items.len != 0) {
+            // Interpret the new file
+            interpreter_.newFile(self.fileNames.items[0]);
+        }
+        for (self.statements.items, 0..) |statement, i| {
+            while (i == startOfNextFile) {
+                fileIndex += 1;
+                interpreter_.newFile(self.fileNames.items[fileIndex]);
+                if (fileIndex + 1 < self.startOfFiles.items.len) {
+                    startOfNextFile = self.startOfFiles.items[fileIndex + 1];
+                } else {
+                    break;
+                }
+            }
             interpreter_.runStatement(statement) catch |err| switch (err) {
                 error.Overflow, error.UnknownIdentifier => {
                     try errbw.flush();

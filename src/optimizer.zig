@@ -4,91 +4,6 @@ const Statement = @import("ast.zig").Statement;
 const token = @import("./token.zig");
 const Type = @import("./type_inference.zig").Type;
 
-// Convert all lists to consecutive calls of Cons
-pub const ConvertList = struct {
-    pub fn run(ast: *AST, allocator: std.mem.Allocator) !void {
-        switch (ast.*) {
-            .list => |list| {
-                var listExpr = try allocator.create(AST);
-                listExpr.* = .{ .identifier = .{ .token = .{
-                    .start = list.start,
-                    .end = list.end,
-                    .lexeme = "Nil",
-                    .type = .Identifier,
-                } } };
-                errdefer listExpr.deinit(allocator);
-
-                for (list.values.items) |value| {
-                    try run(value, allocator);
-                }
-
-                for (1..list.values.items.len + 1) |i| {
-                    const cons = try allocator.create(AST);
-                    cons.* = .{ .identifier = .{ .token = .{
-                        .start = list.start,
-                        .end = list.end,
-                        .lexeme = "Cons",
-                        .type = .Identifier,
-                    } } };
-                    errdefer cons.deinit(allocator);
-                    const firstCall = try allocator.create(AST);
-                    firstCall.* = .{ .call = .{
-                        .function = cons,
-                        .arg = list.values.items[list.values.items.len - i],
-                    } };
-                    errdefer firstCall.deinit(allocator);
-                    const secondCall = try allocator.create(AST);
-                    secondCall.* = .{ .call = .{
-                        .function = firstCall,
-                        .arg = listExpr,
-                    } };
-                    listExpr = secondCall;
-                }
-                list.values.deinit();
-                ast.* = listExpr.*;
-                allocator.destroy(listExpr);
-            },
-            .let => |let| {
-                try run(let.in, allocator);
-                try run(let.be, allocator);
-            },
-            .ifExpr => |ifExpr| {
-                try run(ifExpr.predicate, allocator);
-                try run(ifExpr.thenExpr, allocator);
-                try run(ifExpr.elseExpr, allocator);
-            },
-            .call => |call| {
-                try run(call.function, allocator);
-                try run(call.arg, allocator);
-            },
-            .operator => |op| {
-                try run(op.left, allocator);
-                try run(op.right, allocator);
-            },
-            .lambda => |lambda| {
-                try run(lambda.expr, allocator);
-            },
-            .prefixOp => |prefixOp| {
-                try run(prefixOp.expr, allocator);
-            },
-            .case => |case| {
-                try run(case.value, allocator);
-                for (case.bodies.items) |body| {
-                    try run(body, allocator);
-                }
-            },
-            .lambdaMult,
-            .callMult,
-            .intConstant,
-            .floatConstant,
-            .boolConstant,
-            .charConstant,
-            .identifier,
-            => {},
-        }
-    }
-};
-
 // Create a list of bound variables for each closure
 // so not the entire env has to be cloned
 pub const OptimizeClosures = struct {
@@ -253,6 +168,9 @@ pub const OptimizeFullyInstantiatedCalls = struct {
         while (isCall) {
             const prev = currentExpr;
             currentExpr = currentExpr.call.function;
+            if (prev.call.functionType) |t| {
+                t.deinit(allocator);
+            }
             allocator.destroy(prev);
             switch (currentExpr.*) {
                 .call => {
@@ -262,6 +180,9 @@ pub const OptimizeFullyInstantiatedCalls = struct {
                     isCall = false;
                 },
             }
+        }
+        if (ast.call.functionType) |t| {
+            t.deinit(allocator);
         }
         ast.* = .{ .callMult = .{
             .args = arguments,
@@ -283,14 +204,23 @@ pub const OptimizeFullyInstantiatedCalls = struct {
                 expr = ast.lambda.expr.lambdaMult.expr;
                 ast.lambda.expr.lambdaMult.encloses.deinit();
                 allocator.destroy(ast.lambda.expr);
-                if (ast.lambda.argType) |argType| {
-                    argType.type.deinit(allocator);
-                }
             },
             else => {
                 arguments = .init(allocator);
                 expr = ast.lambda.expr;
             },
+        }
+        if (ast.lambda.argType) |argType| {
+            argType.type.deinit(allocator);
+        }
+        if (ast.lambda.enclosesTypes) |enclosesTypes| {
+            for (enclosesTypes.items) |t| {
+                t.deinit(allocator);
+            }
+            enclosesTypes.deinit();
+        }
+        if (ast.lambda.type) |t| {
+            t.deinit(allocator);
         }
         try arguments.append(ast.lambda.argname);
         const start = ast.lambda.start;
@@ -364,18 +294,19 @@ pub const OptimizeFullyInstantiatedCalls = struct {
 };
 
 // Run all optimizations consecutively on a statement
-pub fn optimizeStatement(statement: *Statement, allocator: std.mem.Allocator) !void {
+pub fn optimizeStatement(statement: *Statement, allocator: std.mem.Allocator, interpreted: bool) !void {
     switch (statement.*) {
         .let => |let| {
             if (let.monomorphizations) |monomorphizations| {
                 for (monomorphizations.items) |monomorphization| {
-                    try ConvertList.run(monomorphization, allocator);
                     try OptimizeClosures.run(monomorphization, allocator);
+                    if (interpreted)
+                        try OptimizeFullyInstantiatedCalls.run(monomorphization, allocator);
                 }
             } else {
-                try ConvertList.run(let.be, allocator);
                 try OptimizeClosures.run(let.be, allocator);
-                //try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
+                if (interpreted)
+                    try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
             }
         },
         .type => {},
