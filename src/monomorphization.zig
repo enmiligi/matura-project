@@ -159,6 +159,7 @@ pub const Monomorphizer = struct {
                 try instantiateAST(op.expr, boundVars);
             },
             .case => |case| {
+                instantiateFreeVars(case.valueType.?, boundVars);
                 try instantiateAST(case.value, boundVars);
                 for (case.bodies.items) |body| {
                     try instantiateAST(body, boundVars);
@@ -332,14 +333,11 @@ pub const Monomorphizer = struct {
                                 errdefer for (monoConstructor.args.items) |arg| {
                                     arg.deinit(self.allocator);
                                 };
-                                monoLoop: for (t.monomorphizations.?.items) |*monomorphization| {
-                                    for (inst, monomorphization.inst) |t1, t2| {
-                                        if (!typesEqual(t1, t2)) {
-                                            continue :monoLoop;
-                                        }
+                                for (t.monomorphizations.?.items) |*monomorphization| {
+                                    if (equalInstantiation(inst, monomorphization.inst)) {
+                                        try monomorphization.constructors.append(monoConstructor);
+                                        continue :instLoop;
                                     }
-                                    try monomorphization.constructors.append(monoConstructor);
-                                    continue :instLoop;
                                 }
                                 var constructors = std.ArrayList(Statement.Constructor).init(self.allocator);
                                 try constructors.append(monoConstructor);
@@ -387,14 +385,13 @@ pub const Monomorphizer = struct {
                             const instantiations = self.idToInstantiations.get(id.token.lexeme).?;
                             var present = false;
                             var index = instantiations.items.len;
-                            outer: for (instantiations.items, 0..) |instantiation, i| {
-                                for (types, instantiation) |t1, t2| {
-                                    if (!typesEqual(t1, t2)) {
-                                        continue :outer;
-                                    }
+                            for (instantiations.items, 0..) |instantiation, i| {
+                                if (!equalInstantiation(instantiation, types)) {
+                                    continue;
                                 }
                                 present = true;
                                 index = i;
+                                break;
                             }
                             if (!present) {
                                 try instantiations.append(types);
@@ -647,6 +644,10 @@ pub const Monomorphizer = struct {
                 } };
             },
             .case => |case| {
+                const copiedValueType = try self.monomorphizeType(case.valueType.?, variables, groundTypes);
+                errdefer copiedValueType.deinit(self.allocator);
+                const copiedResultType = try self.monomorphizeType(case.resultType.?, variables, groundTypes);
+                errdefer copiedResultType.deinit(self.allocator);
                 const copiedValue = try self.monomorphizeAST(case.value, variables, groundTypes);
                 errdefer copiedValue.deinit(self.allocator);
                 var copiedPatterns = try std.ArrayList(Pattern).initCapacity(
@@ -703,6 +704,8 @@ pub const Monomorphizer = struct {
                 copiedAST.* = .{ .case = .{
                     .start = case.start,
                     .value = copiedValue,
+                    .valueType = copiedValueType,
+                    .resultType = copiedResultType,
                     .patterns = copiedPatterns,
                     .bodies = copiedBodies,
                 } };
@@ -828,11 +831,20 @@ pub const Monomorphizer = struct {
         return copiedTypes;
     }
 
-    pub fn typesEqual(left: *Type, right: *Type) bool {
+    pub fn equalInstantiation(inst1: []*Type, inst2: []*Type) bool {
+        for (inst1, inst2) |t1, t2| {
+            if (!equalTypes(t1, t2)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    pub fn equalTypes(left: *Type, right: *Type) bool {
         switch (right.data) {
             .typeVar => |tV1| {
                 if (tV1.subst) |subst| {
-                    return typesEqual(left, subst);
+                    return equalTypes(left, subst);
                 }
             },
             else => {},
@@ -840,7 +852,7 @@ pub const Monomorphizer = struct {
         switch (left.data) {
             .typeVar => |tV1| {
                 if (tV1.subst) |subst| {
-                    return typesEqual(subst, right);
+                    return equalTypes(subst, right);
                 }
                 switch (right.data) {
                     .typeVar => |tV2| {
@@ -857,7 +869,7 @@ pub const Monomorphizer = struct {
                         return primitive1 == primitive2;
                     },
                     .number => |number| {
-                        return typesEqual(left, number.variable);
+                        return equalTypes(left, number.variable);
                     },
                     else => {
                         return false;
@@ -867,7 +879,7 @@ pub const Monomorphizer = struct {
             .function => |function1| {
                 switch (right.data) {
                     .function => |function2| {
-                        return typesEqual(function1.from, function2.from) and typesEqual(function1.to, function2.to);
+                        return equalTypes(function1.from, function2.from) and equalTypes(function1.to, function2.to);
                     },
                     else => {
                         return false;
@@ -881,7 +893,7 @@ pub const Monomorphizer = struct {
                             return false;
                         }
                         for (composite1.args.items, composite2.args.items) |type1, type2| {
-                            if (!typesEqual(type1, type2)) {
+                            if (!equalTypes(type1, type2)) {
                                 return false;
                             }
                         }
@@ -895,7 +907,7 @@ pub const Monomorphizer = struct {
             .number => |number1| {
                 switch (right.data) {
                     .number => |number2| {
-                        return typesEqual(number1.variable, number2.variable);
+                        return equalTypes(number1.variable, number2.variable);
                     },
                     else => {
                         return false;

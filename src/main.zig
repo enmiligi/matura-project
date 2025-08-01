@@ -87,10 +87,7 @@ pub fn main() !u8 {
 
     try fileParser.newSource(
         \\type L a = N | C a (L a)
-        \\let myList = C 5 (C 7 (C 11 N))
-        \\type P a = P a a
-        \\type G a = B a | G (G (P a))
-        \\let grow = G (B (P 1 2))
+        \\let test = case C 5 (C 7 N) of N => 0 | C num rest => (case rest of N => num | C num2 rest2 => num + num2)
     );
     var statements = try fileParser.file();
     defer {

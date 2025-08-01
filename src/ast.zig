@@ -116,8 +116,10 @@ pub const AST = union(enum) {
     case: struct {
         start: usize,
         value: *AST,
+        valueType: ?*Type = null,
         patterns: std.ArrayList(Pattern),
         bodies: std.ArrayList(*AST),
+        resultType: ?*Type = null,
     },
     list: struct {
         start: usize,
@@ -210,6 +212,12 @@ pub const AST = union(enum) {
             },
             .case => |case| {
                 case.value.deinit(allocator);
+                if (case.valueType) |valueType| {
+                    valueType.deinit(allocator);
+                }
+                if (case.resultType) |resultType| {
+                    resultType.deinit(allocator);
+                }
                 for (case.patterns.items) |*pattern| {
                     pattern.deinit(allocator);
                 }

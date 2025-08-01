@@ -5,10 +5,11 @@ pub const c = @cImport({
 });
 const AST = @import("ast.zig").AST;
 const Statement = @import("ast.zig").Statement;
+const Pattern = @import("ast.zig").Pattern;
 const std = @import("std");
 const Type = @import("./type_inference.zig").Type;
 const AlgorithmJ = @import("./type_inference.zig").AlgorithmJ;
-const typesEqual = @import("monomorphization.zig").Monomorphizer.typesEqual;
+const equalInstantiation = @import("monomorphization.zig").Monomorphizer.equalInstantiation;
 
 pub const Compiler = struct {
     context: c.LLVMContextRef,
@@ -39,6 +40,7 @@ pub const Compiler = struct {
         tag: usize,
         tagSize: usize,
         constructType: c.LLVMTypeRef,
+        constructorType: c.LLVMTypeRef,
     }),
 
     fn impToLLVMType(self: *Compiler, t: *Type) c.LLVMTypeRef {
@@ -95,15 +97,11 @@ pub const Compiler = struct {
                     .monos => |ms| {
                         const insts = ms.insts;
                         const llvmTypes = ms.llvmTypes;
-                        outer: for (insts.items, llvmTypes.items) |inst, llvmType| {
-                            for (inst.inst, comp.args.items) |t1, t2| {
-                                if (!typesEqual(t1, t2)) {
-                                    continue :outer;
-                                }
-                            }
-                            return llvmType;
+                        for (insts.items, llvmTypes.items) |inst, llvmType| {
+                            if (equalInstantiation(comp.args.items, inst.inst))
+                                return llvmType;
                         }
-                        return null;
+                        return c.LLVMStructType(null, 0, 0);
                     },
                 }
             },
@@ -159,7 +157,7 @@ pub const Compiler = struct {
         return null;
     }
 
-    pub fn compileExpr(self: *Compiler, ast: *AST) !c.LLVMValueRef {
+    pub fn compileExpr(self: *Compiler, ast: *AST) anyerror!c.LLVMValueRef {
         switch (ast.*) {
             .lambda => |lambda| {
                 const argType = self.impToLLVMType(lambda.type.?.data.function.from);
@@ -564,10 +562,197 @@ pub const Compiler = struct {
                 c.LLVMAddIncoming(phi, &incomingValues, &incomingBlocks, 2);
                 return phi;
             },
+            .case => |case| {
+                const typeName = case.valueType.?.data.composite.name;
+                const typeMonomorphizations = self.nameToMonomorphizations.get(typeName).?;
+                const value = try self.compileExpr(case.value);
+                switch (typeMonomorphizations) {
+                    .mono => |t| {
+                        return self.compileCase(
+                            case.bodies.items.len,
+                            typeName,
+                            t,
+                            value,
+                            ast,
+                        );
+                    },
+                    .monos => |monos| {
+                        var mono: Statement.TypeMonomorphization = undefined;
+                        var found = false;
+                        for (monos.insts.items) |candidateMono| {
+                            if (equalInstantiation(
+                                case.valueType.?.data.composite.args.items,
+                                candidateMono.inst,
+                            )) {
+                                mono = candidateMono;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            return c.LLVMBuildUnreachable(self.builder);
+                        }
+                        for (case.patterns.items) |*pattern| {
+                            for (mono.constructors.items) |constructor| {
+                                const baseConstructorName = baseName(constructor.name.lexeme);
+                                if (std.mem.eql(u8, pattern.name.lexeme, baseConstructorName)) {
+                                    pattern.name.lexeme = constructor.name.lexeme;
+                                }
+                            }
+                        }
+                        const constructType = self.nameToTagInfo.get(
+                            mono.constructors.items[0].name.lexeme,
+                        ).?.constructType;
+                        return self.compileCase(
+                            case.bodies.items.len,
+                            typeName,
+                            constructType,
+                            value,
+                            ast,
+                        );
+                    },
+                }
+            },
             else => {
                 return null;
             },
         }
+    }
+
+    fn baseName(monomorphized: []const u8) []const u8 {
+        var i: usize = 1;
+        while (std.ascii.isDigit(monomorphized[i])) {
+            i += 1;
+        }
+        return monomorphized[i..];
+    }
+
+    fn compileCase(
+        self: *Compiler,
+        numCases: usize,
+        typeName: []const u8,
+        constructType: c.LLVMTypeRef,
+        value: c.LLVMValueRef,
+        caseExpr: *AST,
+    ) !c.LLVMValueRef {
+        var valueLoc = c.LLVMBuildAlloca(self.builder, constructType, "");
+        _ = c.LLVMBuildStore(self.builder, value, valueLoc);
+        const case = caseExpr.case;
+        if (numCases == 1) {
+            for (case.patterns.items, case.bodies.items) |pattern, body| {
+                // All non-existent constructors have only the base name
+                // meaning they are not in the list, since they only exist
+                // in theory, but in reality they need to be monomorphized
+                if (self.nameToTagInfo.contains(pattern.name.lexeme)) {
+                    return self.compilePattern(
+                        pattern,
+                        typeName,
+                        body,
+                        valueLoc,
+                    );
+                }
+            }
+            return null;
+        }
+        const originalBB = c.LLVMGetInsertBlock(self.builder);
+        const defaultBB = c.LLVMAppendBasicBlock(self.function, "default");
+        c.LLVMPositionBuilderAtEnd(self.builder, defaultBB);
+        _ = c.LLVMBuildUnreachable(self.builder);
+        const resumeBB = c.LLVMAppendBasicBlock(self.function, "resumeSwitch");
+        c.LLVMPositionBuilderAtEnd(self.builder, resumeBB);
+        const phi = c.LLVMBuildPhi(
+            self.builder,
+            self.impToLLVMType(case.resultType.?),
+            "caseResult",
+        );
+        c.LLVMPositionBuilderAtEnd(self.builder, originalBB);
+        valueLoc = c.LLVMBuildStructGEP2(
+            self.builder,
+            constructType,
+            valueLoc,
+            1,
+            "",
+        );
+        const tag = c.LLVMBuildExtractValue(self.builder, value, 0, "tag");
+        const switchInst = c.LLVMBuildSwitch(
+            self.builder,
+            tag,
+            defaultBB,
+            @intCast(case.bodies.items.len),
+        );
+        for (case.patterns.items, case.bodies.items) |pattern, body| {
+            if (self.nameToTagInfo.get(pattern.name.lexeme)) |tagInfo| {
+                const copiedName = try self.allocator.dupeZ(u8, pattern.name.lexeme);
+                defer self.allocator.free(copiedName);
+                const caseBB = c.LLVMAppendBasicBlock(self.function, copiedName);
+                _ = c.LLVMAddCase(
+                    switchInst,
+                    c.LLVMConstInt(
+                        c.LLVMIntType(@intCast(tagInfo.tagSize)),
+                        @intCast(tagInfo.tag),
+                        0,
+                    ),
+                    caseBB,
+                );
+                c.LLVMPositionBuilderAtEnd(self.builder, caseBB);
+                var bodyResult = try self.compilePattern(
+                    pattern,
+                    typeName,
+                    body,
+                    valueLoc,
+                );
+                var currentBB = c.LLVMGetInsertBlock(self.builder);
+                _ = c.LLVMBuildBr(self.builder, resumeBB);
+                c.LLVMAddIncoming(phi, &bodyResult, &currentBB, 1);
+            }
+        }
+        c.LLVMPositionBuilderAtEnd(self.builder, resumeBB);
+        return phi;
+    }
+
+    fn compilePattern(
+        self: *Compiler,
+        pattern: Pattern,
+        typeName: []const u8,
+        body: *AST,
+        valueLoc: c.LLVMValueRef,
+    ) !c.LLVMValueRef {
+        const tagInfo = self.nameToTagInfo.get(pattern.name.lexeme).?;
+        const constructorStruct = tagInfo.constructorType;
+        for (pattern.values.items, pattern.types.?.items, 0..) |valueToken, valueType, i| {
+            const valuePtr = c.LLVMBuildStructGEP2(
+                self.builder,
+                constructorStruct,
+                valueLoc,
+                @intCast(i),
+                "",
+            );
+            var value = c.LLVMBuildLoad2(
+                self.builder,
+                c.LLVMStructGetTypeAtIndex(constructorStruct, @intCast(i)),
+                valuePtr,
+                "",
+            );
+            // Dereference recursion pointer
+            if (self.containsType(typeName, valueType)) {
+                value = c.LLVMBuildLoad2(
+                    self.builder,
+                    self.impToLLVMType(valueType),
+                    value,
+                    "",
+                );
+            }
+            c.LLVMSetValueName2(
+                value,
+                valueToken.lexeme.ptr,
+                valueToken.lexeme.len,
+            );
+            try self.idToValue.put(valueToken.lexeme, value);
+        }
+        defer for (pattern.values.items) |valueToken| {
+            _ = self.idToValue.remove(valueToken.lexeme);
+        };
+        return self.compileExpr(body);
     }
 
     fn containsType(self: *Compiler, typeName: []const u8, t: *Type) bool {
@@ -689,7 +874,15 @@ pub const Compiler = struct {
         numConstructors: usize,
         originalBB: c.LLVMBasicBlockRef,
     ) !void {
+        const constructorStructAndArgs = try self.constructorType(
+            typeName,
+            constructor,
+        );
+        const constructorStruct = constructorStructAndArgs.type;
+        const constructorStructArgs = constructorStructAndArgs.args;
+        defer self.allocator.free(constructorStructArgs);
         var result: c.LLVMValueRef = undefined;
+
         if (constructor.args.items.len == 0) {
             // Put the number of the constructor in the value (tag)
             if (numConstructors != 1) {
@@ -734,14 +927,6 @@ pub const Compiler = struct {
 
             // Reserve space for the value so pointer manipulation can be done
             const construct = c.LLVMBuildAlloca(self.builder, structType, "");
-
-            const constructorStructAndArgs = try self.constructorType(
-                typeName,
-                constructor,
-            );
-            const constructorStruct = constructorStructAndArgs.type;
-            const constructorStructArgs = constructorStructAndArgs.args;
-            defer self.allocator.free(constructorStructArgs);
 
             var insertPoint = construct;
 
@@ -957,6 +1142,7 @@ pub const Compiler = struct {
                 numConstructors,
             )),
             .constructType = structType,
+            .constructorType = constructorStruct,
         });
     }
 

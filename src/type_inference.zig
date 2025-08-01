@@ -1293,7 +1293,7 @@ pub const AlgorithmJ = struct {
                 let.actualType = generalised;
                 return typeOfExpr;
             },
-            .case => |case| {
+            .case => |*case| {
                 self.allocator.destroy(t);
                 const typeOfValue = try self.run(case.value);
                 defer typeOfValue.deinit(self.allocator);
@@ -1357,7 +1357,7 @@ pub const AlgorithmJ = struct {
                 }
 
                 const copiedCompositeType = try self.copyAndReplace(composite.compositeType.?, &instantiatedVars, &copyMap);
-                defer copiedCompositeType.deinit(self.allocator);
+                defer case.valueType = copiedCompositeType;
                 self.unify(typeOfValue, copiedCompositeType) catch |err| switch (err) {
                     error.CouldNotUnify => {
                         try self.errors.typeComparison(
@@ -1510,6 +1510,8 @@ pub const AlgorithmJ = struct {
                     };
                     pattern.types = matchedTypes;
                 }
+                resultType.rc += 1;
+                case.resultType = resultType;
                 return resultType;
             },
             .list => |list| {
