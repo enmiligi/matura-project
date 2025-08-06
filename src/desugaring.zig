@@ -37,15 +37,19 @@ pub const ConvertList = struct {
                     } };
                     errdefer cons.deinit(allocator);
                     const firstCall = try allocator.create(AST);
+                    list.consType.?.rc += 1;
                     firstCall.* = .{ .call = .{
                         .function = cons,
                         .arg = list.values.items[list.values.items.len - i],
+                        .functionType = list.consType.?,
                     } };
                     errdefer firstCall.deinit(allocator);
                     const secondCall = try allocator.create(AST);
+                    list.consType.?.data.function.to.rc += 1;
                     secondCall.* = .{ .call = .{
                         .function = firstCall,
                         .arg = listExpr,
+                        .functionType = list.consType.?.data.function.to,
                     } };
                     listExpr = secondCall;
                 }

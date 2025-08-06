@@ -102,13 +102,14 @@ pub const Interpreter = struct {
         try env.put("parseFloat", .{ .builtinFunction = &parseFloat });
         try env.put("showInt", .{ .builtinFunction = &showInt });
         try env.put("showFloat", .{ .builtinFunction = &showFloat });
-        try env.put("trace", .{ .builtinFunction = &trace });
     }
 
     // Print takes a value, prints it to standard output
     // and returns Void
     fn print(self: *Interpreter, arg: Value) !Value {
-        try value.printValue(arg, self.stdout);
+        const string = try self.listToString(arg);
+        defer string.deinit();
+        try self.stdout.print("{s}", .{string.items});
         const composite = try self.objects.makeConstruct("Void", null);
         return composite;
     }
@@ -145,14 +146,6 @@ pub const Interpreter = struct {
             try self.traceEnv(nextEnv, isError);
         }
         try self.printEnvTrace(env, isError);
-    }
-
-    // Print the stack trace to stdout
-    fn trace(self: *Interpreter, arg: Value) !Value {
-        try self.traceEnv(self.currentEnv, false);
-        try self.stdout.print("\n", .{});
-        try self.stdoutbw.flush();
-        return arg;
     }
 
     // To print a runtime error, print the trace and the error message

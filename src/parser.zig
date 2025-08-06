@@ -78,13 +78,12 @@ pub const Parser = struct {
             self.typeVarMap.?.deinit();
             self.typeVarMap = null;
         }
-        try self.initBuiltin("print", "a -> Void");
+        try self.initBuiltin("print", "List Char -> Void");
         try self.initBuiltin("read", "Void -> List Char");
         try self.initBuiltin("parseInt", "List Char -> Option Int");
         try self.initBuiltin("parseFloat", "List Char -> Option Float");
         try self.initBuiltin("showInt", "Int -> List Char");
         try self.initBuiltin("showFloat", "Float -> List Char");
-        try self.initBuiltin("trace", "Void -> Void");
     }
 
     // Switch the source code of the parser to another file

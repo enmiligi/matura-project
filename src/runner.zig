@@ -225,12 +225,11 @@ pub const Runner = struct {
     }
 
     pub fn monomorphize(self: *Runner, monomorphizer: *Monomorphizer) !void {
-        Monomorphizer.instantiate(self.allocator, &self.statements);
-        monomorphizer.monomorphize(&self.statements);
+        try Monomorphizer.instantiate(self.allocator, &self.statements);
+        try monomorphizer.monomorphize(&self.statements);
     }
 
     pub fn compile(self: *Runner, compiler_: *Compiler) !void {
-        compiler_.compile(&self.statements);
-        compiler.c.LLVMDumpModule(compiler_.module);
+        try compiler_.compile(&self.statements);
     }
 };

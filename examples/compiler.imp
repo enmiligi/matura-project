@@ -1,0 +1,5 @@
+let test = parseInt "12a"
+let main = lambda v.
+    case test of
+        None => print "None"
+        | Some n => print (showInt n)

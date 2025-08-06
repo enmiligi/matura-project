@@ -83,41 +83,6 @@ pub fn main() !u8 {
     );
     defer interpreter_.deinit();
 
-    var compiler_ = try compiler.Compiler.init(allocator, &algorithmJ);
-    defer compiler_.deinit();
-
-    try fileParser.newSource(
-        \\type L a = N | C a (L a)
-        \\let test = case C 5 (C 7 N) of N => 0 | C num rest => (case rest of N => num | C num2 rest2 => num + num2)
-    );
-    var statements = try fileParser.file();
-    defer {
-        for (statements.items) |*statement| {
-            statement.deinit(allocator);
-        }
-        statements.deinit();
-    }
-
-    for (statements.items) |*statement| {
-        try desugaring.desugarStatement(statement, allocator);
-        try algorithmJ.checkStatement(statement);
-    }
-
-    try monomorphization.Monomorphizer.instantiate(allocator, &statements);
-
-    var monomorphizer = monomorphization.Monomorphizer.init(allocator, &algorithmJ);
-    defer monomorphizer.deinit();
-
-    try monomorphizer.monomorphize(&statements);
-
-    for (statements.items) |*statement| {
-        try optimizer.optimizeStatement(statement, allocator, false);
-    }
-
-    _ = try compiler_.compile(&statements);
-
-    compiler.c.LLVMDumpModule(compiler_.module);
-
     // Read builtin types
     const binDirName = std.fs.path.dirname(consoleArgs[0]) orelse ".";
     var binDir: std.fs.Dir = undefined;
@@ -237,24 +202,49 @@ pub fn main() !u8 {
         return returnCode;
     }
 
-    try fileRunner.optimize(true);
+    try fileRunner.optimize(false);
 
-    if (try fileRunner.run(&interpreter_, &errbw)) |returnCode| {
-        return returnCode;
-    }
+    const compile = true;
+    if (compile) {
+        var monomorphizer = try monomorphization.Monomorphizer.init(
+            allocator,
+            &algorithmJ,
+        );
+        defer monomorphizer.deinit();
+        try fileRunner.monomorphize(&monomorphizer);
 
-    // Run the main function
-    interpreter_.runMain() catch |err| switch (err) {
-        error.Overflow, error.UnknownIdentifier => {
+        var compiler_ = try compiler.Compiler.init(allocator, &algorithmJ);
+        defer compiler_.deinit();
+        try compiler_.initBuiltins();
+        try fileRunner.compile(&compiler_);
+
+        var errorMessage: [*c]u8 = null;
+        if (compiler.c.LLVMPrintModuleToFile(
+            compiler_.module,
+            "a.out.ll",
+            &errorMessage,
+        ) != 0) {
+            try stderr.print("{s}", .{errorMessage});
             try errbw.flush();
             return 1;
-        },
-        else => {
-            return err;
-        },
-    };
+        }
+    } else {
+        if (try fileRunner.run(&interpreter_, &errbw)) |returnCode| {
+            return returnCode;
+        }
 
-    try bw.flush();
+        // Run the main function
+        interpreter_.runMain() catch |err| switch (err) {
+            error.Overflow, error.UnknownIdentifier => {
+                try errbw.flush();
+                return 1;
+            },
+            else => {
+                return err;
+            },
+        };
+        try bw.flush();
+    }
 
     return 0;
 }

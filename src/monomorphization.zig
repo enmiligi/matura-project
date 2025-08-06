@@ -19,22 +19,39 @@ pub const Monomorphizer = struct {
     algorithmJ: *type_inference.AlgorithmJ,
     monomorphizeDefinition: ?[]const u8 = null,
     monomorphizeNumber: ?usize = null,
+    charType: *Type,
+    intType: *Type,
+    floatType: *Type,
 
     pub fn init(
         allocator: std.mem.Allocator,
         algorithmJ: *type_inference.AlgorithmJ,
-    ) Monomorphizer {
+    ) !Monomorphizer {
+        const charType = try Type.init(allocator);
+        charType.data = .{ .primitive = .Char };
+        errdefer charType.deinit(allocator);
+        const intType = try Type.init(allocator);
+        intType.data = .{ .primitive = .Int };
+        errdefer intType.deinit(allocator);
+        const floatType = try Type.init(allocator);
+        floatType.data = .{ .primitive = .Float };
         return .{
             .allocator = allocator,
             .idToTypeScheme = .init(allocator),
             .idToInstantiations = .init(allocator),
             .algorithmJ = algorithmJ,
+            .charType = charType,
+            .intType = intType,
+            .floatType = floatType,
         };
     }
 
     pub fn deinit(self: *Monomorphizer) void {
         self.idToInstantiations.deinit();
         self.idToTypeScheme.deinit();
+        self.charType.deinit(self.allocator);
+        self.floatType.deinit(self.allocator);
+        self.intType.deinit(self.allocator);
     }
 
     pub fn instantiateFreeVars(t: *Type, boundVars: *std.AutoHashMap(usize, void)) void {
@@ -300,6 +317,89 @@ pub const Monomorphizer = struct {
                 },
             }
         }
+
+        // Consider Cons and Nil for lists of type Char to be used
+        // And also Some and None for Ints and Float respectively
+        // because of builtin functions
+        var charInst = try self.allocator.alloc(*Type, 1);
+        defer self.allocator.free(charInst);
+        charInst[0] = self.charType;
+        const consTypes = self.idToInstantiations.get("Cons").?;
+        var present = false;
+        for (consTypes.items) |consInst| {
+            if (equalInstantiation(consInst, charInst)) {
+                present = true;
+            }
+        }
+        if (!present) {
+            const copiedCharInst = try self.allocator.dupe(*Type, charInst);
+            errdefer self.allocator.free(copiedCharInst);
+            try consTypes.append(copiedCharInst);
+        }
+        const nilTypes = self.idToInstantiations.get("Nil").?;
+        present = false;
+        for (nilTypes.items) |nilInst| {
+            if (equalInstantiation(nilInst, charInst)) {
+                present = true;
+            }
+        }
+        if (!present) {
+            const copiedCharInst = try self.allocator.dupe(*Type, charInst);
+            errdefer self.allocator.free(copiedCharInst);
+            try nilTypes.append(copiedCharInst);
+        }
+
+        const intInst = try self.allocator.alloc(*Type, 1);
+        defer self.allocator.free(intInst);
+        intInst[0] = self.intType;
+        const floatInst = try self.allocator.alloc(*Type, 1);
+        defer self.allocator.free(floatInst);
+        floatInst[0] = self.floatType;
+
+        const someTypes = self.idToInstantiations.get("Some").?;
+        var intFound = false;
+        var floatFound = false;
+        for (someTypes.items) |someInst| {
+            if (equalInstantiation(someInst, intInst)) {
+                intFound = true;
+            }
+            if (equalInstantiation(someInst, floatInst)) {
+                floatFound = true;
+            }
+        }
+        if (!intFound) {
+            const copiedIntInst = try self.allocator.dupe(*Type, intInst);
+            errdefer self.allocator.free(copiedIntInst);
+            try someTypes.append(copiedIntInst);
+        }
+        if (!floatFound) {
+            const copiedFloatInst = try self.allocator.dupe(*Type, floatInst);
+            errdefer self.allocator.free(copiedFloatInst);
+            try someTypes.append(copiedFloatInst);
+        }
+
+        const noneTypes = self.idToInstantiations.get("None").?;
+        intFound = false;
+        floatFound = false;
+        for (noneTypes.items) |noneInst| {
+            if (equalInstantiation(noneInst, intInst)) {
+                intFound = true;
+            }
+            if (equalInstantiation(noneInst, floatInst)) {
+                floatFound = true;
+            }
+        }
+        if (!intFound) {
+            const copiedIntInst = try self.allocator.dupe(*Type, intInst);
+            errdefer self.allocator.free(copiedIntInst);
+            try noneTypes.append(copiedIntInst);
+        }
+        if (!floatFound) {
+            const copiedFloatInst = try self.allocator.dupe(*Type, floatInst);
+            errdefer self.allocator.free(copiedFloatInst);
+            try noneTypes.append(copiedFloatInst);
+        }
+
         for (0..file.items.len) |i| {
             const statement = &file.items[file.items.len - i - 1];
             switch (statement.*) {

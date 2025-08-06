@@ -42,6 +42,7 @@ pub const Compiler = struct {
         constructType: c.LLVMTypeRef,
         constructorType: c.LLVMTypeRef,
     }),
+    stringType: c.LLVMTypeRef,
 
     fn impToLLVMType(self: *Compiler, t: *Type) c.LLVMTypeRef {
         switch (t.data) {
@@ -1218,6 +1219,8 @@ pub const Compiler = struct {
                 },
             }
         }
+
+        _ = c.LLVMBuildRetVoid(self.builder);
     }
 
     const initError = error{TargetError};
@@ -1234,7 +1237,7 @@ pub const Compiler = struct {
         c.LLVMSetTarget(module, targetTriple);
         var topLevelArgs = [0]c.LLVMTypeRef{};
         const topLevelType = c.LLVMFunctionType(c.LLVMVoidType(), &topLevelArgs, 0, 0);
-        const topLevel = c.LLVMAddFunction(module, "topLevel", topLevelType);
+        const topLevel = c.LLVMAddFunction(module, "main", topLevelType);
         const topLevelBlock = c.LLVMAppendBasicBlock(topLevel, "entry");
         const builder = c.LLVMCreateBuilderInContext(context);
         c.LLVMPositionBuilderAtEnd(builder, topLevelBlock);
@@ -1257,6 +1260,29 @@ pub const Compiler = struct {
         var param_types = [2]c.LLVMTypeRef{ c.LLVMDoubleType(), c.LLVMDoubleType() };
         const fn_type = c.LLVMFunctionType(c.LLVMDoubleType(), &param_types, 2, 0);
         const pow_intrinsic = c.LLVMAddFunction(module, "llvm.pow.f64", fn_type);
+
+        const pointerSize = c.LLVMABISizeOfType(
+            dataLayout,
+            c.LLVMPointerType(c.LLVMInt8Type(), 0),
+        );
+        const pointerAlignment = c.LLVMABIAlignmentOfType(
+            dataLayout,
+            c.LLVMPointerType(c.LLVMInt8Type(), 0),
+        );
+        const stringContents = c.LLVMArrayType(
+            c.LLVMIntType(pointerAlignment * 8),
+            try std.math.divCeil(
+                c_uint,
+                @intCast(pointerSize + 1),
+                pointerAlignment,
+            ),
+        );
+        var stringItems = [2]c.LLVMTypeRef{
+            c.LLVMInt1Type(),
+            stringContents,
+        };
+        const stringType = c.LLVMStructType(&stringItems, 2, 0);
+
         return .{
             .context = context,
             .module = module,
@@ -1266,6 +1292,7 @@ pub const Compiler = struct {
             .dataLayout = dataLayout,
             .powFunction = pow_intrinsic,
             .powType = fn_type,
+            .stringType = stringType,
             .idToValue = .init(allocator),
             .idToFunctionNumber = .init(allocator),
             .namesToFree = .init(allocator),
@@ -1276,6 +1303,133 @@ pub const Compiler = struct {
             .targetTriple = targetTriple,
             .algorithmJ = algorithmJ,
         };
+    }
+
+    pub fn initBuiltins(self: *Compiler) !void {
+        var optionArgs = [2]c.LLVMTypeRef{
+            c.LLVMInt1Type(),
+            c.LLVMArrayType(c.LLVMInt64Type(), 1),
+        };
+        const option = c.LLVMStructType(&optionArgs, 2, 0);
+        try self.initBuiltin(
+            "parseInt\x00",
+            self.stringType,
+            option,
+        );
+        try self.initBuiltin(
+            "parseFloat\x00",
+            self.stringType,
+            option,
+        );
+
+        try self.initBuiltin(
+            "showInt\x00",
+            c.LLVMInt64Type(),
+            self.stringType,
+        );
+        try self.initBuiltin(
+            "showFloat\x00",
+            c.LLVMDoubleType(),
+            self.stringType,
+        );
+        try self.initBuiltin(
+            "read\x00",
+            c.LLVMStructType(null, 0, 0),
+            self.stringType,
+        );
+        try self.initBuiltin(
+            "print\x00",
+            self.stringType,
+            c.LLVMStructType(null, 0, 0),
+        );
+    }
+
+    // Name should be null terminated
+    pub fn initBuiltin(
+        self: *Compiler,
+        name: []const u8,
+        argType: c.LLVMTypeRef,
+        returnType: c.LLVMTypeRef,
+    ) !void {
+        var functionArgs = [2]c.LLVMTypeRef{
+            c.LLVMPointerType(argType, 0),
+            c.LLVMPointerType(returnType, 0),
+        };
+        const functionType = c.LLVMFunctionType(
+            c.LLVMVoidType(),
+            &functionArgs,
+            2,
+            0,
+        );
+        const function = c.LLVMAddFunction(self.module, name.ptr, functionType);
+
+        var wrapperArgs = [2]c.LLVMTypeRef{
+            argType,
+            c.LLVMPointerType(c.LLVMInt8Type(), 0),
+        };
+        const wrapperType = c.LLVMFunctionType(returnType, &wrapperArgs, 2, 0);
+        const wrapperName = try std.fmt.allocPrint(
+            self.allocator,
+            "fun_{d}\x00",
+            .{self.currentFunction},
+        );
+        self.currentFunction += 1;
+        defer self.allocator.free(wrapperName);
+        const wrapper = c.LLVMAddFunction(
+            self.module,
+            wrapperName.ptr,
+            wrapperType,
+        );
+        const originalBB = c.LLVMGetInsertBlock(self.builder);
+        const entryBB = c.LLVMAppendBasicBlock(wrapper, "entry");
+        c.LLVMPositionBuilderAtEnd(self.builder, entryBB);
+
+        const returnPtr = c.LLVMBuildAlloca(
+            self.builder,
+            returnType,
+            "returnPtr",
+        );
+        const argPtr = c.LLVMBuildAlloca(
+            self.builder,
+            argType,
+            "argPtr",
+        );
+        _ = c.LLVMBuildStore(self.builder, c.LLVMGetParam(wrapper, 0), argPtr);
+        var args = [2]c.LLVMValueRef{ argPtr, returnPtr };
+        _ = c.LLVMBuildCall2(self.builder, functionType, function, &args, 2, "");
+        const result = c.LLVMBuildLoad2(
+            self.builder,
+            returnType,
+            returnPtr,
+            "result",
+        );
+        _ = c.LLVMBuildRet(self.builder, result);
+
+        var closureArgs = [2]c.LLVMTypeRef{
+            c.LLVMPointerType(functionType, 0),
+            c.LLVMPointerType(c.LLVMInt8Type(), 0),
+        };
+        const closureType = c.LLVMStructType(&closureArgs, 2, 0);
+
+        c.LLVMPositionBuilderAtEnd(self.builder, originalBB);
+
+        var closure = c.LLVMGetUndef(closureType);
+        closure = c.LLVMBuildInsertValue(
+            self.builder,
+            closure,
+            wrapper,
+            0,
+            "",
+        );
+        closure = c.LLVMBuildInsertValue(
+            self.builder,
+            closure,
+            c.LLVMConstNull(c.LLVMPointerType(c.LLVMInt8Type(), 0)),
+            1,
+            name.ptr,
+        );
+
+        try self.idToValue.put(name[0 .. name.len - 1], closure);
     }
 
     pub fn deinit(self: *Compiler) void {
