@@ -88,6 +88,7 @@ void parseFloat(String *string, Option *result) {
     contents.array[1] = rest.contents[1];
     *curr = contents.actual.c;
     rest = *contents.actual.next;
+    curr++;
   }
 
   double d;
@@ -125,9 +126,10 @@ void print(String *string, Void *result) {
     contents.array[1] = rest.contents[1];
     *curr = contents.actual.c;
     rest = *contents.actual.next;
+    curr++;
   }
 
-  printf("%zu%s\n", length, text);
+  printf("%s", text);
 }
 
 String fromArray(char *array) {
@@ -158,12 +160,13 @@ String fromArray(char *array) {
 }
 
 void read(Void *v, String *result) {
-  fflush(stdout);
   char *line = NULL;
   size_t lineCap = 0;
   ssize_t linelen;
 
   linelen = getline(&line, &lineCap, stdin);
+  // Eliminate newline from line
+  line[linelen - 1] = 0;
 
   *result = fromArray(line);
 

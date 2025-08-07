@@ -1,5 +1,0 @@
-let main = lambda v.
-    print let x = 5 in
-        (let y = lambda z. z in y)
-            (let z = (let y = lambda w. w in 5) in
-                (lambda w. w) z)

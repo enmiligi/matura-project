@@ -47,4 +47,4 @@ let primes = lambda max.
         reverse (helper 2 Nil)
 
 let main = lambda x.
-    print (primes 20)
+    printList (lambda n. print (showInt n)) (primes 20)

@@ -902,6 +902,7 @@ pub const AlgorithmJ = struct {
                         return err;
                     },
                 };
+                _ = self.globalTypes.remove(name.lexeme);
                 deinitScheme(typeOfVarScheme, self.allocator);
             },
             else => {},
@@ -1072,7 +1073,7 @@ pub const AlgorithmJ = struct {
                             return err;
                         },
                     };
-                } else if (op.token.lexeme[0] != '=' and op.token.lexeme[0] != '!') {
+                } else {
                     const tV = try Type.init(self.allocator);
                     tV.* = self.newVarT();
                     const tNumber = Type.init(self.allocator) catch |err| {

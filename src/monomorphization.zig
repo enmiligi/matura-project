@@ -199,7 +199,7 @@ pub const Monomorphizer = struct {
                     self.getInstantiation(
                         forallVars,
                         subst,
-                        t,
+                        t.data.typeVar.subst.?,
                         setInstantiations,
                     );
                 } else {
@@ -212,7 +212,7 @@ pub const Monomorphizer = struct {
                 self.getInstantiation(
                     forallVars,
                     number.variable,
-                    t,
+                    t.data.number.variable,
                     setInstantiations,
                 );
             },
@@ -282,7 +282,12 @@ pub const Monomorphizer = struct {
         }
     }
 
-    pub fn monomorphize(self: *Monomorphizer, file: *std.ArrayList(Statement)) !void {
+    // Monomorphizes a file and returns the name of the correct main function
+    pub fn monomorphize(
+        self: *Monomorphizer,
+        file: *std.ArrayList(Statement),
+        mainType: *Type,
+    ) ![]const u8 {
         for (file.items) |*statement| {
             switch (statement.*) {
                 .let => |*let| {
@@ -400,6 +405,23 @@ pub const Monomorphizer = struct {
             try noneTypes.append(copiedFloatInst);
         }
 
+        // Consider main instantiated
+        const mainId = try self.allocator.create(AST);
+        mainType.rc += 1;
+        mainId.* = .{
+            .identifier = .{
+                .token = .{
+                    .start = 0,
+                    .end = 0,
+                    .lexeme = "main",
+                    .type = .Identifier,
+                },
+                .idType = mainType,
+            },
+        };
+        defer mainId.deinit(self.allocator);
+        try self.monomorphizeExpr(mainId);
+
         for (0..file.items.len) |i| {
             const statement = &file.items[file.items.len - i - 1];
             switch (statement.*) {
@@ -451,6 +473,11 @@ pub const Monomorphizer = struct {
                 },
             }
         }
+
+        return self.allocator.dupe(
+            u8,
+            mainId.identifier.token.lexeme,
+        );
     }
 
     fn monomorphizeConstructor(

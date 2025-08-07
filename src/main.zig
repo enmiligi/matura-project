@@ -193,16 +193,20 @@ pub fn main() !u8 {
         return returnCode;
     }
 
-    if (try fileRunner.checkStatements(
+    const checkResult = try fileRunner.checkStatements(
         &algorithmJ,
         &errs,
         stderr.any(),
         &errbw,
-    )) |returnCode| {
-        return returnCode;
-    }
+    );
 
-    try fileRunner.optimize(false);
+    var mainType = switch (checkResult) {
+        .returnCode => |returnCode| {
+            return returnCode;
+        },
+        .mainType => |mainType| mainType,
+    };
+    defer mainType.deinit(allocator);
 
     const compile = true;
     if (compile) {
@@ -211,9 +215,19 @@ pub fn main() !u8 {
             &algorithmJ,
         );
         defer monomorphizer.deinit();
-        try fileRunner.monomorphize(&monomorphizer);
+        const mainName = try fileRunner.monomorphize(
+            &monomorphizer,
+            mainType,
+        );
+        defer allocator.free(mainName);
 
-        var compiler_ = try compiler.Compiler.init(allocator, &algorithmJ);
+        try fileRunner.optimize(false);
+
+        var compiler_ = try compiler.Compiler.init(
+            allocator,
+            &algorithmJ,
+            mainName,
+        );
         defer compiler_.deinit();
         try compiler_.initBuiltins();
         try fileRunner.compile(&compiler_);
@@ -229,6 +243,8 @@ pub fn main() !u8 {
             return 1;
         }
     } else {
+        try fileRunner.optimize(false);
+
         if (try fileRunner.run(&interpreter_, &errbw)) |returnCode| {
             return returnCode;
         }

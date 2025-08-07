@@ -1,4 +1,4 @@
 let double = lambda x. x + x
 let six = double 3
 let main = lambda x.
-    print (double 2.7)
+    print (showFloat (double 2.7))

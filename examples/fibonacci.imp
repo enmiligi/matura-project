@@ -1,11 +1,11 @@
-let fibonacciHelper: Number a => a -> a -> Int -> a =
+let fibonacciHelper: Int -> Int -> Int -> Int =
     lambda prev. lambda current. lambda n.
         if n > 0 then
-            print current;
+            print (showInt current);
             print " ";
             fibonacciHelper current (prev + current) (n - 1)
         else
-            print current;
+            print (showInt current);
             print "\n";
             current
 

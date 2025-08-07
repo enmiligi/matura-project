@@ -27,10 +27,14 @@ pub const Compiler = struct {
     targetTriple: [*c]u8,
     algorithmJ: *AlgorithmJ,
     namesToFree: std.ArrayList([]const u8),
+    mainName: []const u8,
 
     // User-defined types
     nameToMonomorphizations: std.StringHashMap(union(enum) {
-        mono: c.LLVMTypeRef,
+        mono: struct {
+            monoType: c.LLVMTypeRef,
+            constructors: std.ArrayList(Statement.Constructor),
+        },
         monos: struct {
             insts: std.ArrayList(Statement.TypeMonomorphization),
             llvmTypes: std.ArrayList(c.LLVMTypeRef),
@@ -92,8 +96,8 @@ pub const Compiler = struct {
             .composite => |comp| {
                 const monos = self.nameToMonomorphizations.get(comp.name).?;
                 switch (monos) {
-                    .mono => |monoType| {
-                        return monoType;
+                    .mono => |mono| {
+                        return mono.monoType;
                     },
                     .monos => |ms| {
                         const insts = ms.insts;
@@ -156,6 +160,31 @@ pub const Compiler = struct {
         }
         try self.putValue(be, name);
         return null;
+    }
+
+    fn innermostType(t: *Type) *Type {
+        var innerMost = t;
+        var foundInner = true;
+        while (foundInner) {
+            switch (innerMost.data) {
+                .typeVar => |tV| {
+                    if (tV.subst) |subst| {
+                        innerMost = subst;
+                        foundInner = true;
+                    } else {
+                        foundInner = false;
+                    }
+                },
+                .number => |number| {
+                    innerMost = number.variable;
+                    foundInner = true;
+                },
+                else => {
+                    foundInner = false;
+                },
+            }
+        }
+        return innerMost;
     }
 
     pub fn compileExpr(self: *Compiler, ast: *AST) anyerror!c.LLVMValueRef {
@@ -307,32 +336,12 @@ pub const Compiler = struct {
             .operator => |op| {
                 const left = try self.compileExpr(op.left);
                 const right = try self.compileExpr(op.right);
-                var innerMost = op.argType;
-                var foundInner = true;
-                while (foundInner) {
-                    switch (innerMost.?.data) {
-                        .typeVar => |tV| {
-                            if (tV.subst) |subst| {
-                                innerMost = subst;
-                                foundInner = true;
-                            } else {
-                                foundInner = false;
-                            }
-                        },
-                        .number => |number| {
-                            innerMost = number.variable;
-                            foundInner = true;
-                        },
-                        else => {
-                            foundInner = false;
-                        },
-                    }
-                }
+                const innerMost = innermostType(op.argType.?);
                 var isInt = false;
                 var isFloat = false;
                 var isChar = false;
                 var isBool = false;
-                switch (innerMost.?.data) {
+                switch (innerMost.data) {
                     .primitive => |prim| {
                         switch (prim) {
                             .Int => {
@@ -421,7 +430,7 @@ pub const Compiler = struct {
                         unreachable;
                     },
                     '=' => {
-                        if (isInt or isChar or isBool) {
+                        if (isInt or isChar) {
                             return c.LLVMBuildICmp(self.builder, c.LLVMIntEQ, left, right, "");
                         } else if (isFloat) {
                             return c.LLVMBuildFCmp(self.builder, c.LLVMRealOEQ, left, right, "");
@@ -429,7 +438,7 @@ pub const Compiler = struct {
                         unreachable;
                     },
                     '!' => {
-                        if (isInt or isChar or isBool) {
+                        if (isInt or isChar) {
                             return c.LLVMBuildICmp(self.builder, c.LLVMIntNE, left, right, "");
                         } else if (isFloat) {
                             return c.LLVMBuildFCmp(self.builder, c.LLVMRealUNE, left, right, "");
@@ -451,29 +460,10 @@ pub const Compiler = struct {
                 }
             },
             .prefixOp => |op| {
-                var innerMost = op.argType;
-                var foundInner = true;
-                while (foundInner) {
-                    switch (innerMost.?.data) {
-                        .typeVar => |tV| {
-                            if (tV.subst) |subst| {
-                                innerMost = subst;
-                                foundInner = true;
-                            }
-                            foundInner = false;
-                        },
-                        .number => |number| {
-                            innerMost = number.variable;
-                            foundInner = true;
-                        },
-                        else => {
-                            foundInner = false;
-                        },
-                    }
-                }
+                const innerMost = innermostType(op.argType.?);
                 var isInt = false;
                 var isFloat = false;
-                switch (innerMost.?.data) {
+                switch (innerMost.data) {
                     .primitive => |prim| {
                         switch (prim) {
                             .Int => {
@@ -539,17 +529,15 @@ pub const Compiler = struct {
             },
             .ifExpr => |ifExpr| {
                 const condition = try self.compileExpr(ifExpr.predicate);
-                const originalPos = c.LLVMGetInsertBlock(self.builder);
                 var thenBlock = c.LLVMAppendBasicBlock(self.function, "then");
+                var elseBlock = c.LLVMAppendBasicBlock(self.function, "else");
+                _ = c.LLVMBuildCondBr(self.builder, condition, thenBlock, elseBlock);
                 c.LLVMPositionBuilderAtEnd(self.builder, thenBlock);
                 const thenValue = try self.compileExpr(ifExpr.thenExpr);
                 thenBlock = c.LLVMGetInsertBlock(self.builder);
-                var elseBlock = c.LLVMAppendBasicBlock(self.function, "else");
                 c.LLVMPositionBuilderAtEnd(self.builder, elseBlock);
                 const elseValue = try self.compileExpr(ifExpr.elseExpr);
                 elseBlock = c.LLVMGetInsertBlock(self.builder);
-                c.LLVMPositionBuilderAtEnd(self.builder, originalPos);
-                _ = c.LLVMBuildCondBr(self.builder, condition, thenBlock, elseBlock);
                 const ifContinueBlock = c.LLVMAppendBasicBlock(self.function, "ifContinue");
                 c.LLVMPositionBuilderAtEnd(self.builder, thenBlock);
                 _ = c.LLVMBuildBr(self.builder, ifContinueBlock);
@@ -568,11 +556,11 @@ pub const Compiler = struct {
                 const typeMonomorphizations = self.nameToMonomorphizations.get(typeName).?;
                 const value = try self.compileExpr(case.value);
                 switch (typeMonomorphizations) {
-                    .mono => |t| {
+                    .mono => |mono| {
                         return self.compileCase(
                             case.bodies.items.len,
                             typeName,
-                            t,
+                            mono.monoType,
                             value,
                             ast,
                         );
@@ -965,7 +953,11 @@ pub const Compiler = struct {
                     @intCast(i),
                     "",
                 );
-                const argType = self.impToLLVMType(arg);
+                var argType: c.LLVMTypeRef = self.impToLLVMType(arg);
+                if (self.containsType(typeName, arg)) {
+                    argType = c.LLVMPointerType(argType, 0);
+                }
+
                 const value = c.LLVMBuildLoad2(self.builder, argType, pointer, "");
                 const resultPointer = c.LLVMBuildStructGEP2(
                     self.builder,
@@ -1202,7 +1194,10 @@ pub const Compiler = struct {
                         );
                         try self.nameToMonomorphizations.put(
                             t.name.lexeme,
-                            .{ .mono = structType },
+                            .{ .mono = .{
+                                .monoType = structType,
+                                .constructors = t.constructors,
+                            } },
                         );
                         const originalBB = c.LLVMGetInsertBlock(self.builder);
                         for (t.constructors.items, 0..) |constructor, constructorNum| {
@@ -1220,12 +1215,45 @@ pub const Compiler = struct {
             }
         }
 
+        // Call the main function
+        const voidType = c.LLVMStructType(null, 0, 0);
+        var mainArgs = [2]c.LLVMTypeRef{
+            voidType,
+            c.LLVMPointerType(c.LLVMInt8Type(), 0),
+        };
+        const mainType = c.LLVMFunctionType(voidType, &mainArgs, 2, 0);
+
+        const mainClosure = self.idToValue.get(self.mainName).?;
+        const mainFunction = c.LLVMBuildExtractValue(
+            self.builder,
+            mainClosure,
+            0,
+            "main",
+        );
+        const mainBound = c.LLVMBuildExtractValue(
+            self.builder,
+            mainClosure,
+            1,
+            "mainBound",
+        );
+        const voidValue = c.LLVMGetUndef(voidType);
+        var args = [2]c.LLVMValueRef{
+            voidValue,
+            mainBound,
+        };
+
+        _ = c.LLVMBuildCall2(self.builder, mainType, mainFunction, &args, 2, "");
+
         _ = c.LLVMBuildRetVoid(self.builder);
     }
 
     const initError = error{TargetError};
 
-    pub fn init(allocator: std.mem.Allocator, algorithmJ: *AlgorithmJ) !Compiler {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        algorithmJ: *AlgorithmJ,
+        mainName: []const u8,
+    ) !Compiler {
         c.LLVMInitializeAllTargetInfos();
         c.LLVMInitializeAllTargets();
         c.LLVMInitializeAllTargetMCs();
@@ -1260,6 +1288,10 @@ pub const Compiler = struct {
         var param_types = [2]c.LLVMTypeRef{ c.LLVMDoubleType(), c.LLVMDoubleType() };
         const fn_type = c.LLVMFunctionType(c.LLVMDoubleType(), &param_types, 2, 0);
         const pow_intrinsic = c.LLVMAddFunction(module, "llvm.pow.f64", fn_type);
+
+        const layoutStr = c.LLVMCopyStringRepOfTargetData(dataLayout);
+        defer c.LLVMDisposeMessage(layoutStr);
+        c.LLVMSetDataLayout(module, layoutStr);
 
         const pointerSize = c.LLVMABISizeOfType(
             dataLayout,
@@ -1302,6 +1334,7 @@ pub const Compiler = struct {
             .allocator = allocator,
             .targetTriple = targetTriple,
             .algorithmJ = algorithmJ,
+            .mainName = mainName,
         };
     }
 

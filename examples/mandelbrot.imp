@@ -12,9 +12,9 @@ let iterate =
 
 let printPoint = lambda re. lambda im.
     if iterate 0.0 0.0 re im 100 then
-        print '#'
+        print "#"
     else
-        print ' '
+        print " "
 
 let printRow =
     lambda im. lambda reStart. lambda reEnd. lambda stride.
@@ -26,7 +26,7 @@ let printRow =
 
 let printMandelbrot =
     lambda imStart. lambda imEnd. lambda imStride.
-        printRow imStart (-2.0) 2.0 0.001;
+        printRow imStart (-2.0) 2.0 0.01;
         print "\n";
         if imStart + imStride <= imEnd then
             printMandelbrot (imStart + imStride) imEnd imStride
@@ -34,4 +34,4 @@ let printMandelbrot =
             Void
 
 let main = lambda v.
-    printMandelbrot (-2.0) 2.0 0.001
+    printMandelbrot (-2.0) 2.0 0.01

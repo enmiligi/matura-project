@@ -57,3 +57,21 @@ let filter: (a -> Bool) -> List a -> List a =
         foldr
             (lambda x. lambda acc. if pred x then Cons x acc else acc)
             Nil xs
+
+let printListContents: (a -> Void) -> List a -> Void =
+    lambda printer. lambda xs.
+        case xs of
+            Cons x rest =>
+                printer x;
+                (case rest of
+                    Cons y yrest =>
+                        print ", "
+                    | Nil => Void);
+                printListContents printer rest
+            | Nil => Void
+
+let printList: (a -> Void) -> List a -> Void =
+    lambda printer. lambda xs.
+        print "[";
+        printListContents printer xs;
+        print "]"

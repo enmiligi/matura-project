@@ -8,4 +8,4 @@ let factorial = lambda n.
     factorialHelper n 1
 
 let main = lambda x.
-    print (factorial 20)
+    print (showInt (factorial 20))

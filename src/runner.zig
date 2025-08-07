@@ -83,7 +83,10 @@ pub const Runner = struct {
         errs: *errors.Errors,
         stderr: std.io.AnyWriter,
         errbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
-    ) !?u8 {
+    ) !union(enum) {
+        returnCode: u8,
+        mainType: *type_inference.Type,
+    } {
         var startOfNextFile: usize = undefined;
         if (self.startOfFiles.items.len > 1) {
             startOfNextFile = self.startOfFiles.items[1];
@@ -114,7 +117,7 @@ pub const Runner = struct {
                 error.NonExhaustiveMatch,
                 => {
                     try errbw.flush();
-                    return 1;
+                    return .{ .returnCode = 1 };
                 },
                 else => {
                     return err;
@@ -127,7 +130,7 @@ pub const Runner = struct {
         if (algorithmJ.globalTypes.get("main") == null) {
             try errs.printError("No 'main' defined", .{});
             try errbw.flush();
-            return 1;
+            return .{ .returnCode = 1 };
         }
 
         const vType = try type_inference.Type.init(self.allocator);
@@ -151,7 +154,7 @@ pub const Runner = struct {
             },
             .forall => |*forall| mainType = try algorithmJ.instantiate(forall),
         }
-        defer mainType.deinit(self.allocator);
+        errdefer mainType.deinit(self.allocator);
 
         algorithmJ.unify(mainType, fType) catch |err| switch (err) {
             error.CouldNotUnify => {
@@ -169,14 +172,14 @@ pub const Runner = struct {
                     self.allocator,
                 );
                 try errbw.flush();
-                return 1;
+                return .{ .returnCode = 1 };
             },
             else => {
                 return err;
             },
         };
 
-        return null;
+        return .{ .mainType = mainType };
     }
 
     pub fn optimize(self: *Runner, interpreted: bool) !void {
@@ -224,9 +227,14 @@ pub const Runner = struct {
         return null;
     }
 
-    pub fn monomorphize(self: *Runner, monomorphizer: *Monomorphizer) !void {
+    // Perform monomorphization and return the name of the main function
+    pub fn monomorphize(
+        self: *Runner,
+        monomorphizer: *Monomorphizer,
+        mainType: *type_inference.Type,
+    ) ![]const u8 {
         try Monomorphizer.instantiate(self.allocator, &self.statements);
-        try monomorphizer.monomorphize(&self.statements);
+        return monomorphizer.monomorphize(&self.statements, mainType);
     }
 
     pub fn compile(self: *Runner, compiler_: *Compiler) !void {
