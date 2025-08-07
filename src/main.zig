@@ -14,6 +14,8 @@ pub const runner = @import("./runner.zig");
 pub const compiler = @import("compiler.zig");
 pub const monomorphization = @import("monomorphization.zig");
 
+const compile = @import("config").compile;
+
 const MainError = error{
     WrongUsage,
 };
@@ -208,7 +210,6 @@ pub fn main() !u8 {
     };
     defer mainType.deinit(allocator);
 
-    const compile = true;
     if (compile) {
         var monomorphizer = try monomorphization.Monomorphizer.init(
             allocator,
@@ -242,6 +243,35 @@ pub fn main() !u8 {
             try errbw.flush();
             return 1;
         }
+
+        const baseName = std.fs.path.stem(fileName);
+
+        const builtinsPath = try std.fs.path.join(
+            allocator,
+            &[_][]const u8{
+                binDirName,
+                "../lib/matura-project/builtinFunctions.c",
+            },
+        );
+        defer allocator.free(builtinsPath);
+
+        var cmd = std.process.Child.init(
+            &[_][]const u8{
+                "clang",
+                builtinsPath,
+                "a.out.ll",
+                "-lm",
+                "-lgc",
+                "-O3",
+                "-o",
+                baseName,
+            },
+            allocator,
+        );
+        try cmd.spawn();
+        _ = try cmd.wait();
+
+        try cwd.deleteFile("a.out.ll");
     } else {
         try fileRunner.optimize(false);
 

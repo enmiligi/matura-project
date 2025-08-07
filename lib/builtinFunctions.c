@@ -1,10 +1,14 @@
 #include <errno.h>
+#include <gc/gc.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/cdefs.h>
+
+extern int64_t IMP_main();
 
 int getErrno() { return errno; }
 
@@ -29,7 +33,7 @@ typedef struct Option {
 typedef struct Void {
 } Void;
 
-void parseInt(String *string, Option *result) {
+void IMP_parseInt(String *string, Option *result) {
   String rest = *string;
   size_t length = 0;
   while (!rest.isNil) {
@@ -66,7 +70,7 @@ void parseInt(String *string, Option *result) {
   }
 }
 
-void parseFloat(String *string, Option *result) {
+void IMP_parseFloat(String *string, Option *result) {
   String rest = *string;
   size_t length = 0;
   while (!rest.isNil) {
@@ -104,7 +108,7 @@ void parseFloat(String *string, Option *result) {
   }
 }
 
-void print(String *string, Void *result) {
+void IMP_print(String *string, Void *result) {
   String rest = *string;
   size_t length = 0;
   while (!rest.isNil) {
@@ -132,7 +136,7 @@ void print(String *string, Void *result) {
   printf("%s", text);
 }
 
-String fromArray(char *array) {
+String IMP_fromArray(char *array) {
   String s;
   s.isNil = true;
 
@@ -159,7 +163,7 @@ String fromArray(char *array) {
   return s;
 }
 
-void read(Void *v, String *result) {
+void IMP_read(Void *v, String *result) {
   char *line = NULL;
   size_t lineCap = 0;
   ssize_t linelen;
@@ -168,25 +172,31 @@ void read(Void *v, String *result) {
   // Eliminate newline from line
   line[linelen - 1] = 0;
 
-  *result = fromArray(line);
+  *result = IMP_fromArray(line);
 
   free(line);
 }
 
-void showInt(int64_t *i, String *result) {
+void IMP_showInt(int64_t *i, String *result) {
   int length = snprintf(NULL, 0, "%" PRId64, *i);
   char str[length + 1];
 
   snprintf(&str[0], length + 1, "%" PRId64, *i);
 
-  *result = fromArray(&str[0]);
+  *result = IMP_fromArray(&str[0]);
 }
 
-void showFloat(double *f, String *result) {
+void IMP_showFloat(double *f, String *result) {
   int length = snprintf(NULL, 0, "%f", *f);
   char str[length + 1];
 
   snprintf(&str[0], length + 1, "%f", *f);
 
-  *result = fromArray(&str[0]);
+  *result = IMP_fromArray(&str[0]);
 }
+
+__attribute__((__malloc__())) void *IMP_malloc(size_t size) {
+  return GC_MALLOC(size);
+}
+
+int main() { return IMP_main(); }

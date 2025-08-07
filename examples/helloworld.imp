@@ -1,0 +1,2 @@
+let main = lambda v.
+    print "Hello, World!"

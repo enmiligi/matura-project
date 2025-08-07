@@ -36,8 +36,20 @@ pub fn build(b: *std.Build) !void {
         .linkage = .dynamic,
     });
 
-    exe.linkLibC();
-    exe.linkSystemLibrary("LLVM-19");
+    const options = b.addOptions();
+
+    const compile = switch (target.result.os.tag) {
+        .linux => true,
+        else => false,
+    };
+    options.addOption(bool, "compile", compile);
+
+    exe.root_module.addOptions("config", options);
+
+    if (compile) {
+        exe.linkLibC();
+        exe.linkSystemLibrary("LLVM-19");
+    }
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

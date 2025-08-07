@@ -28,6 +28,8 @@ pub const Compiler = struct {
     algorithmJ: *AlgorithmJ,
     namesToFree: std.ArrayList([]const u8),
     mainName: []const u8,
+    gcMalloc: c.LLVMValueRef,
+    gcMallocType: c.LLVMTypeRef,
 
     // User-defined types
     nameToMonomorphizations: std.StringHashMap(union(enum) {
@@ -263,7 +265,8 @@ pub const Compiler = struct {
                 }
                 const closureType = self.impToLLVMType(lambda.type.?);
                 var closure = c.LLVMGetUndef(closureType);
-                const boundMalloc = c.LLVMBuildMalloc(self.builder, boundStruct, "bound");
+                const boundMalloc = self.malloc(boundStruct);
+                c.LLVMSetValueName(boundMalloc, "bound");
                 enclosedRecursion = 0;
                 for (lambda.encloses.?.items, 0..) |name, i| {
                     if (self.idToFunctionNumber.get(name)) |functionNumber| {
@@ -988,7 +991,7 @@ pub const Compiler = struct {
             // Allocate memory for the value in case of (optionally wrapped) recursion
             const typeValue = constructor.args.items[constructor.args.items.len - 1];
             if (self.containsType(typeName, typeValue)) {
-                const allocInsert = c.LLVMBuildMalloc(self.builder, argTypes[0], "");
+                const allocInsert = self.malloc(argTypes[0]);
                 _ = c.LLVMBuildStore(self.builder, insertValue, allocInsert);
                 insertValue = allocInsert;
             }
@@ -1040,7 +1043,8 @@ pub const Compiler = struct {
                     self.dataLayout,
                     newBoundType,
                 );
-                const newBound = c.LLVMBuildMalloc(self.builder, newBoundType, "bound");
+                const newBound = self.malloc(newBoundType);
+                c.LLVMSetValueName(newBound, "bound");
                 // Unless nothing is bound, copy all bound arguments
                 if (i != constructor.args.items.len - 1) {
                     const boundType = c.LLVMStructType(
@@ -1074,7 +1078,7 @@ pub const Compiler = struct {
                 insertValue = c.LLVMGetParam(function, 0);
                 const newValueType = constructor.args.items[constructor.args.items.len - i - 1];
                 if (self.containsType(typeName, newValueType)) {
-                    const allocInsert = c.LLVMBuildMalloc(self.builder, argTypes[0], "");
+                    const allocInsert = self.malloc(argTypes[0]);
                     _ = c.LLVMBuildStore(self.builder, insertValue, allocInsert);
                     insertValue = allocInsert;
                 }
@@ -1244,10 +1248,26 @@ pub const Compiler = struct {
 
         _ = c.LLVMBuildCall2(self.builder, mainType, mainFunction, &args, 2, "");
 
-        _ = c.LLVMBuildRetVoid(self.builder);
+        _ = c.LLVMBuildRet(
+            self.builder,
+            c.LLVMConstInt(c.LLVMInt64Type(), 0, 0),
+        );
     }
 
     const initError = error{TargetError};
+
+    fn malloc(self: Compiler, t: c.LLVMTypeRef) c.LLVMValueRef {
+        var size = c.LLVMSizeOf(t);
+        const call = c.LLVMBuildCall2(
+            self.builder,
+            self.gcMallocType,
+            self.gcMalloc,
+            &size,
+            1,
+            "",
+        );
+        return call;
+    }
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -1263,9 +1283,9 @@ pub const Compiler = struct {
         const module = c.LLVMModuleCreateWithNameInContext("Imp", context);
         const targetTriple = c.LLVMGetDefaultTargetTriple();
         c.LLVMSetTarget(module, targetTriple);
-        var topLevelArgs = [0]c.LLVMTypeRef{};
-        const topLevelType = c.LLVMFunctionType(c.LLVMVoidType(), &topLevelArgs, 0, 0);
-        const topLevel = c.LLVMAddFunction(module, "main", topLevelType);
+        var mainArgs = [0]c.LLVMTypeRef{};
+        const mainType = c.LLVMFunctionType(c.LLVMInt64Type(), &mainArgs, 0, 0);
+        const topLevel = c.LLVMAddFunction(module, "IMP_main", mainType);
         const topLevelBlock = c.LLVMAppendBasicBlock(topLevel, "entry");
         const builder = c.LLVMCreateBuilderInContext(context);
         c.LLVMPositionBuilderAtEnd(builder, topLevelBlock);
@@ -1293,9 +1313,8 @@ pub const Compiler = struct {
         defer c.LLVMDisposeMessage(layoutStr);
         c.LLVMSetDataLayout(module, layoutStr);
 
-        const pointerSize = c.LLVMABISizeOfType(
+        const pointerSize = c.LLVMPointerSize(
             dataLayout,
-            c.LLVMPointerType(c.LLVMInt8Type(), 0),
         );
         const pointerAlignment = c.LLVMABIAlignmentOfType(
             dataLayout,
@@ -1314,6 +1333,24 @@ pub const Compiler = struct {
             stringContents,
         };
         const stringType = c.LLVMStructType(&stringItems, 2, 0);
+
+        var size_t = c.LLVMIntType(pointerSize * 8);
+        const mallocType = c.LLVMFunctionType(
+            c.LLVMPointerType(c.LLVMInt8Type(), 0),
+            &size_t,
+            1,
+            0,
+        );
+        const gcMalloc = c.LLVMAddFunction(module, "GC_malloc", mallocType);
+
+        const gcInitType = c.LLVMFunctionType(
+            c.LLVMVoidType(),
+            null,
+            0,
+            0,
+        );
+        const gcInit = c.LLVMAddFunction(module, "GC_init", gcInitType);
+        _ = c.LLVMBuildCall2(builder, gcInitType, gcInit, null, 0, "");
 
         return .{
             .context = context,
@@ -1335,6 +1372,8 @@ pub const Compiler = struct {
             .targetTriple = targetTriple,
             .algorithmJ = algorithmJ,
             .mainName = mainName,
+            .gcMalloc = gcMalloc,
+            .gcMallocType = mallocType,
         };
     }
 
@@ -1345,33 +1384,33 @@ pub const Compiler = struct {
         };
         const option = c.LLVMStructType(&optionArgs, 2, 0);
         try self.initBuiltin(
-            "parseInt\x00",
+            "IMP_parseInt\x00",
             self.stringType,
             option,
         );
         try self.initBuiltin(
-            "parseFloat\x00",
+            "IMP_parseFloat\x00",
             self.stringType,
             option,
         );
 
         try self.initBuiltin(
-            "showInt\x00",
+            "IMP_showInt\x00",
             c.LLVMInt64Type(),
             self.stringType,
         );
         try self.initBuiltin(
-            "showFloat\x00",
+            "IMP_showFloat\x00",
             c.LLVMDoubleType(),
             self.stringType,
         );
         try self.initBuiltin(
-            "read\x00",
+            "IMP_read\x00",
             c.LLVMStructType(null, 0, 0),
             self.stringType,
         );
         try self.initBuiltin(
-            "print\x00",
+            "IMP_print\x00",
             self.stringType,
             c.LLVMStructType(null, 0, 0),
         );
@@ -1462,7 +1501,8 @@ pub const Compiler = struct {
             name.ptr,
         );
 
-        try self.idToValue.put(name[0 .. name.len - 1], closure);
+        // Cut off null and the "IMP_" prefix
+        try self.idToValue.put(name[4 .. name.len - 1], closure);
     }
 
     pub fn deinit(self: *Compiler) void {
