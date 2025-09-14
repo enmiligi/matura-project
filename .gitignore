@@ -1,2 +1,6 @@
 .zig-cache/
 zig-out/
+text/*
+!text/code/
+!text/text.tex
+!text/bibliography.bib

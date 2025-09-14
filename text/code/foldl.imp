@@ -1,0 +1,7 @@
+# Compile the values of a List using a given function
+let foldl: (b -> a -> b) -> b -> List a -> b =
+    lambda conj. lambda acc. lambda xs.
+        case xs of
+            Nil => acc
+            | Cons x rest =>
+                foldl conj (conj acc x) rest

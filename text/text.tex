@@ -1,0 +1,281 @@
+\documentclass[12pt]{article}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage[onehalfspacing]{setspace}
+\usepackage[top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm]{geometry}
+\usepackage{mathptmx}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{minted}
+\hypersetup{
+      colorlinks=true,
+}
+\setlist{nosep}
+
+\title{A functional programming language\\Maturaarbeit}
+\author{Enea Giger\\Betreuungsperson: Adrian Lüthi}
+\date{Gymnasium Burgdorf\\\today}
+
+
+\begin{document}
+\maketitle
+\newpage
+
+\begin{abstract}
+      I describe the creation of a new functional programming language called Imp
+      heavily based on the language ML
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+
+\section{Introduction}
+
+\section{Fundamentals}
+To understand how this programming language is different, it is important to understand how programming languages work in general.
+
+\subsection{The Lexer}
+The first step of a programming language implementation is almost always the lexer.
+It is responsible for splitting up the source code into tokens, little chunks like the name of a variable or a statement.
+This can most often be done in one single loop over the code.
+In the implementation of Imp, this is the case.
+These tokens can then be used as input for the parser.
+
+\subsection{The Parser}
+The Parser of a programming language is responsible for ensuring the syntax is correct and, in most cases,
+building an Abstract Syntax Tree (AST) out of the tokens.
+This can be done in many ways, though what methods are applicable
+depend on the syntax of the language.
+\subsubsection{Pratt Parsing}
+Pratt Parsing \cite{prattTopOperatorPrecedence1973}
+is the method that is used for the expressions in this language.
+It works with a list of rules for what to do when a certain type of token is encountered
+either at the start or in the middle of an expression.
+When parsing an expression using this method,
+it starts with the right-binding power of 0.
+
+Then the first type of token is looked up
+in the list of rules for the start
+(in the null denotation, as it's called in the paper).
+This results in a function which is then called
+which parses the expression starting with this token.
+For example, if this is a negation, it also parses the argument
+by recursively calling the expression function again.
+Once this prefix is parsed the algorithm enters a loop:
+\begin{enumerate}
+      \item \label{start}
+            Lookup the next token in the in- and postfix table.
+            (This is called the left denotation in the paper.)
+            This results in a left-binding power and a function
+      \item If there is no function listed or
+            the left-binding power stored is less or equal
+            to the right-binding power, return the current expression
+      \item Otherwise, call the parsing function listed with the current expression
+            and store the result back in the current expression
+      \item Return to step \ref{start}.
+\end{enumerate}
+For infix operators like multiplication, this parsing function
+will call the expression function again, but with a higher right-binding power
+so as to ensure for example that addition can't be parsed in a product,
+since the left binding power of addition is less than
+the right-binding power of multiplication,
+which is the way precedence is solved by this algorithm.
+By changing the numbers, it can also be regulated whether the operator
+is calculated left-to-right or right-to-left.
+
+\subsection{Type Checking/Inference}
+After the program has been parsed, there traditionally follows
+a semantic analysis step. This step most often consists of a type checker
+(if the language is typed) and an optimizing step.
+
+The Type Checking step ensures that all programs are well-typed,
+meaning only operations are applied on the arguments, that can
+be done, so no runtime type error can occur as it does in dynamically typed
+languages like Python.
+
+\subsubsection{Hindley-Milner type inference}
+The Hindley-Milner type inference, as described in
+\cite{damasPrincipalTypeschemesFunctional1982}
+is originally a way to determine types for functions in the
+polymorphic lambda calculus with an addition of let expressions.
+
+\paragraph{Polymorphic Lambda Calculus}
+The Polymorphic Lambda Calculus is a simple model for computation.
+The only operations that are possible are:
+\begin{itemize}
+      \item $\lambda x.\:e$,
+            which creates a function where $x$ is the name of the argument
+            and $e$ is an expression that is given as a result
+      \item $x$, where $x$ is the name of a variable
+            and the result is the value of that variable
+      \item $e_1\:e_2$, where both $e_1$ and $e_2$ are expressions and the result
+            is the result of the call of function $e_1$ with argument $e_2$\item $c$, where $c$ is a constant
+      \item $let\:x = e_1\:in\:e_2$, where x is the name of the variable
+            which is defined to be the result of expression $e_1$ in the scope of expression $e_2$\end{itemize}
+
+\subsubsection{The Inference Algorithm}
+The Hindley-Milner type inference algorithm computes the types of expressions
+by essentially first assuming a maximally generic type and refining it step by step
+using information like the operations used (e.g. function calls).
+If there turns out to be no type possible, the program is not well-typed.
+Important for the type system is the definition, that only let-defined variables
+can be polymorphic (i.e. can take on multiple different types).
+
+\subsection{The Optimizer}
+The next step in the semantic analysis step is in most languages an optimizing step.
+This is done in many passes over the code in most languages. The type of optimizations
+possible depend on how the program is executed, whether the language is typed,
+sometimes also depending on the target machine and many other aspects.
+
+\subsection{The Interpreter}
+The interpreter is the next step in many programming languages.
+It is a program intended to run the user-written program in the new
+language. There are many types of interpreters:
+\begin{itemize}
+      \item \textbf{Byte-Code Interpreters}, which run a
+            a custom-defined intermediate representation that is similar to how
+            machine code works, but more specific to the language. Most interpreted languages
+            use one, because it is most often the fastest possibility.
+      \item \textbf{Threaded Interpreters}, where there is no byte sequence, but pointers
+            to functions to be called or the next instruction. This has the problem that there
+            are many indirect calls and pointer indirections being done, reducing the speed.
+      \item \textbf{Abstract-Syntax-Tree Interpreters}, which directly evaluate the tree,
+            which has more information available, but might not be optimal because of syntax
+            nodes which need to be skipped and there are more indirections than
+            \textbf{Byte-Code Interpreters}
+\end{itemize}
+Both the byte-code and threaded interpreters require a compiler.
+
+\subsection{The Compiler}
+The Compiler uses the parsed program and converts it into another langugage,
+most often the machine language. Programs using the machine language are most often
+faster than ones run by interpreted languages, thanks to directly being able to use
+optimizations in the CPU, which can be used since the program is specific
+and not general like an interpreter.
+
+Many compilers nowadays don't directly convert the code to machine code,
+but depend on a backend. One of the most popular backends is \textbf{LLVM}.
+
+\subsubsection{LLVM}
+\textbf{LLVM}, which originally stood for Low Level Virtual Machine, is
+a backend capable of converting a custom language called
+LLVM IR (Intermediate Representation) into code for several targets,
+like x86-based cpus (most Intel and AMD chips), ARM-based cpus, but also
+WASM (Web Assembly, a language understood by browsers).
+
+It is coded in C++, though bindings exist for several languages, most notably
+C, which can be used from many programming languages.
+
+\section{Implementation}
+
+\subsection{The Language}
+\input{code/either.tex}
+\input{code/foldl.tex}
+
+The Syntax of the language consists of statements and expressions.
+
+There are only two types of statements.
+\begin{itemize}
+      \item Type statements, which define an algebraic data type,
+            meaning a type whose values can be constructed by various
+            constructors when given specific types.
+            These types can be generic.
+            An example can be seen in listing \ref{listing:either}, where the type Either is defined,
+            which can be constructed by either a value of type a or of type b.
+      \item Let statements, which define an (immutable) variable
+            in the rest of the file. If the variable is assigned a
+            lambda expression, it can be recursive
+\end{itemize}
+Statements are separated from expressions by not being indented,
+which has the consequence that all expressions have to be indented,
+but makes it so that there does not need to be an end keyword
+for these statements.
+This is the only case of significant whitespace in the language.
+
+The types of expressions that exist are:
+\begin{itemize}
+      \item Lambda expressions, which work exactly
+            the same as in pure lambda calculus
+      \item Let expressions, which work the same as in pure
+            lambda calculus, except, as with the statement,
+            it can be recursive if assigned a lambda
+      \item Variables,
+      \item Function Calls,
+      \item Constants, meaning Integers (whole numbers), Floats,
+            One-Byte Unicode Characters, and Booleans,
+      \item If expressions,
+      \item Operator applications (both prefix and infix),
+      \item Case expressions, which match a value of an ADT
+            based on the Constructor,
+      \item and syntax sugar for lists and strings,
+            which are lists of characters
+\end{itemize}
+
+Comments start with a $\#$ sign and end with the end of the line.
+
+An example of code in this language is the fold left function
+given in Listing \ref{listing:foldl}.
+
+\subsection{The Lexer}
+The lexer of Imp is a simple single-pass lexer, that computes
+the tokens on-demand. This is done to avoid additional memory
+allocations other than creating the AST.
+
+\subsubsection{Token Types}
+\begin{itemize}
+      \item The Keywords $let$ and $in$, $lambda$, $if$, $then$ and $else$,
+            $case$ and $of$, $or$, and $and$,
+      \item The special characters $.$, $=$, $:$, $($ and $)$, $[$ and $]$
+      \item The special sequences $->$ and $=>$,
+      \item all operators for comparison and mathematical operations,
+            and the special operator $;$,
+      \item Numbers, Booleans, Characters and Strings,
+      \item Identifiers,
+      \item and Special Tokens for new lines and the end of the file
+\end{itemize}
+
+\subsection{The Parser}
+\input{code/expressions.tex}
+
+The Parser consists of a pretty straight-forward implementation of the Pratt Parsing algorithm
+for the expressions as shown in listing \ref{listing:expressions} and a simple loop for statements.
+In this implementation, the lookup table is represented by two functions,
+\mintinline{zig}|getNud| and \mintinline{zig}|getLed|.
+The problem that there might not be an entry is solved by returning null
+in that case.
+
+\subsection{Type Checking/Inference}
+The Type Checker is also mostly an implementation close to the Algorithm J as described
+in the paper \cite{damasPrincipalTypeschemesFunctional1982}
+There is however a significant difference to the original type system:
+There exists a special type Number(a), which can be either a Float or an Int
+and therefore can be unified by them Both. When unified, the runtime representation
+is then Number(Int) or Number(Float).
+It is printed similarly to how Type Class constraints are in Haskell.
+This means that the type Number(a) is printed as \texttt{Number a => a}.
+However, in order to be able to compute free type variables for generalization
+faster, levels as described in \cite{EfficientInsightfulGeneralization} are
+used. However, they are called depth in the code.
+
+\subsection{The Optimizer}
+
+\subsection{The Interpreter}
+
+\subsection{The Compiler}
+
+\section{Results}
+
+\section{Discussion}
+
+\section{Conclusions}
+
+\newpage
+\bibliographystyle{IEEEtran}
+\bibliography{bibliography}
+
+\listoflistings
+
+The source code for this project can be found at: \href{https://github.com/enmiligi/matura-project}{GitHub}
+
+\end{document}
