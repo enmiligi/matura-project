@@ -1,0 +1,34 @@
+\begin{lstlisting}[
+	% there are many more options of styling, see the official documentation, these are just the defaults I like
+	frame=single, % make single-line frame around the verbatim
+	framesep=2mm, % put some more spacing between the frame and text
+	aboveskip=5mm, % put some more space above the box
+	basicstyle={\linespread{0.9}\small\ttfamily}, % use typewriter (monospace) font
+	caption={Outline of the Optimizer}, % set the caption text
+	captionpos=b, % put the caption at the bottom (b) or top (t) or both (bt)
+    label={listing:optimizer}, % label to be referenced via \ref{}
+	numbers=left, % line numbers on the left
+	numberstyle={\scriptsize\ttfamily\color{black!60}}, % the style for line numbers
+	escapeinside={<@}{@>} % between those sequences are commands evaluated
+]
+<@\textcolor[HTML]{7777BB}{\textit{\texttt{//\ Create\ a\ list\ of\ bound\ variables\ for\ each\ closure}}}@>
+<@\textcolor[HTML]{7777BB}{\textit{\texttt{//\ so\ not\ the\ entire\ env\ has\ to\ be\ cloned}}}@>
+<@\textcolor[HTML]{3010CF}{\textit{\textbf{\texttt{pub}}}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{3010CF}{\textit{\textbf{\texttt{const}}}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{EA5110}{\texttt{OptimizeClosures}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{1041FF}{\texttt{=}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{3010CF}{\textit{\textbf{\texttt{struct}}}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{FF1010}{\texttt{\{}}@>
+<@\textcolor[HTML]{000000}{\texttt{\ \ \ \ }}@><@\textcolor[HTML]{AA1090}{\textit{\texttt{...}}}@>
+<@\textcolor[HTML]{FF1010}{\texttt{\}}}@><@\textcolor[HTML]{1041FF}{\texttt{;}}@>
+
+<@\textcolor[HTML]{7777BB}{\textit{\texttt{//\ Convert\ consecutive\ lambdas\ or\ calls\ into\ one\ object}}}@>
+<@\textcolor[HTML]{3010CF}{\textit{\textbf{\texttt{pub}}}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{3010CF}{\textit{\textbf{\texttt{const}}}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{EA5110}{\texttt{OptimizeFullyInstantiatedCalls}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{1041FF}{\texttt{=}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{3010CF}{\textit{\textbf{\texttt{struct}}}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{FF1010}{\texttt{\{}}@>
+<@\textcolor[HTML]{000000}{\texttt{\ \ \ \ }}@><@\textcolor[HTML]{AA1090}{\textit{\texttt{...}}}@>
+<@\textcolor[HTML]{FF1010}{\texttt{\}}}@><@\textcolor[HTML]{1041FF}{\texttt{;}}@>
+
+<@\textcolor[HTML]{7777BB}{\textit{\texttt{//\ Run\ all\ optimizations\ consecutively\ on\ a\ statement}}}@>
+<@\textcolor[HTML]{3010CF}{\textit{\textbf{\texttt{pub}}}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{3010CF}{\textbf{\texttt{fn}}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{255CFF}{\texttt{optimizeStatement}}@><@\textcolor[HTML]{FF1010}{\texttt{(}}@>
+<@\textcolor[HTML]{000000}{\texttt{\ \ \ \ }}@><@\textcolor[HTML]{EA5110}{\texttt{statement}}@><@\textcolor[HTML]{1041FF}{\texttt{:}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{1041FF}{\texttt{*}}@><@\textcolor[HTML]{EA5110}{\texttt{Statement}}@><@\textcolor[HTML]{1041FF}{\texttt{,}}@>
+<@\textcolor[HTML]{000000}{\texttt{\ \ \ \ }}@><@\textcolor[HTML]{EA5110}{\texttt{allocator}}@><@\textcolor[HTML]{1041FF}{\texttt{:}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{EA5110}{\texttt{std}}@><@\textcolor[HTML]{1041FF}{\texttt{.}}@><@\textcolor[HTML]{000000}{\texttt{mem}}@><@\textcolor[HTML]{1041FF}{\texttt{.}}@><@\textcolor[HTML]{000000}{\texttt{Allocator}}@><@\textcolor[HTML]{1041FF}{\texttt{,}}@>
+<@\textcolor[HTML]{000000}{\texttt{\ \ \ \ }}@><@\textcolor[HTML]{EA5110}{\texttt{interpreted}}@><@\textcolor[HTML]{1041FF}{\texttt{:}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{10909F}{\texttt{bool}}@>
+<@\textcolor[HTML]{FF1010}{\texttt{)}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{1041FF}{\texttt{!}}@><@\textcolor[HTML]{10909F}{\texttt{void}}@><@\textcolor[HTML]{000000}{\texttt{\ }}@><@\textcolor[HTML]{FF1010}{\texttt{\{}}@>
+<@\textcolor[HTML]{000000}{\texttt{\ \ \ \ }}@><@\textcolor[HTML]{AA1090}{\textit{\texttt{...}}}@>
+<@\textcolor[HTML]{FF1010}{\texttt{\}}}@>
+
+\end{lstlisting}

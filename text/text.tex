@@ -7,6 +7,7 @@
 \usepackage{enumitem}
 \usepackage{listings}
 \usepackage{minted}
+\usepackage{dirtree}
 \hypersetup{
       colorlinks=true,
 }
@@ -169,6 +170,30 @@ C, which can be used from many programming languages.
 
 \section{Implementation}
 
+\subsection{Used Software}
+
+The Software was developed using the Editors Visual Studio Code and Zed.
+Zed was used primarily, but VS Code was very useful to debug the code.
+Once Zed got Debugger support however, it was the only editor used.
+
+The Programming Language itself was implemented in Zig, a new low-level programming
+language that aims to improve on C. Zig was used in this project, since it has builtin
+support for tagged unions and a build system. However, for the compiler, C was still used for
+a few builtin functions.
+
+For the ability to syntax highlight code in Imp, a parser was made using tree-sitter.
+This parser is written in JavaScript. Since the grammar of the language is too complex,
+a custom lexer was also needed, which itself was written in C.
+To state what parts of the code should be colored how, Queries had to be written as well,
+which are written in an unnamed language unique to Tree-sitter.
+
+Highlighting with Tree-sitter was chosen specifically since it is used
+in the editor Zed, enabling a custom extension to be written for Imp.
+
+This article itself was written in LaTex, while the listings are generated
+by \href{https://github.com/TomLebeda/chroma_code}{chromacode}.
+
+
 \subsection{The Language}
 \input{code/either.tex}
 \input{code/foldl.tex}
@@ -181,7 +206,7 @@ There are only two types of statements.
             meaning a type whose values can be constructed by various
             constructors when given specific types.
             These types can be generic.
-            An example can be seen in listing \ref{listing:either}, where the type Either is defined,
+            An example can be seen in Listing \ref{listing:either}, where the type Either is defined,
             which can be constructed by either a value of type a or of type b.
       \item Let statements, which define an (immutable) variable
             in the rest of the file. If the variable is assigned a
@@ -239,7 +264,7 @@ allocations other than creating the AST.
 \input{code/expressions.tex}
 
 The Parser consists of a pretty straight-forward implementation of the Pratt Parsing algorithm
-for the expressions as shown in listing \ref{listing:expressions} and a simple loop for statements.
+for the expressions as shown in Listing \ref{listing:expressions} and a simple loop for statements.
 In this implementation, the lookup table is represented by two functions,
 \mintinline{zig}|getNud| and \mintinline{zig}|getLed|.
 The problem that there might not be an entry is solved by returning null
@@ -259,12 +284,37 @@ faster, levels as described in \cite{EfficientInsightfulGeneralization} are
 used. However, they are called depth in the code.
 
 \subsection{The Optimizer}
+\input{code/optimizer.tex}
+
+The Optimizer works slightly different depending on whether
+the code is interpreted or compiled. In the case that it is interpreted
+the optimizer also combines lambdas into larger objects,
+while the compiler doesn't need this. However, in both cases
+a list of bound variables is gathered per function definition,
+since all functions are closures.
+The outline of the optimizer is shown in Listing \ref{listing:optimizer}.
 
 \subsection{The Interpreter}
+The Interpreter is a simple tree-walking Interpreter,
+meaning it directly uses the AST to run the code.
+The most important optimization it employs is proper tail call elimination,
+meaning it doesn't make another stack frame if the function call is the last
+thing a function does, making recursion feasible through
+tail recursion. This is done by creating a simple form of trampolining,
+where the evaluation of an expression returns the next thing to
+do, which is then repeatedly evaluated in a loop until the final result
+is reached.
 
 \subsection{The Compiler}
-
-\section{Results}
+The Compiler converts the AST into LLVM IR using the C API through
+Zig's FFI. Here, little is done to optimize the IR created apart
+from recursive calls being done directly instead of through an indirect
+call, as all other function calls are done.
+Closures are represented in the IR as a struct consisting of two pointers:
+The first being the function pointer, the second being a pointer to the heap
+where all bound variables are stored.
+Then clang is called on the IR, linking it with a very small library of builtin
+functions with the highest optimization level of -O3.
 
 \section{Discussion}
 
@@ -276,6 +326,8 @@ used. However, they are called depth in the code.
 
 \listoflistings
 
+\appendix
+\section{Source Code}
 The source code for this project can be found at: \href{https://github.com/enmiligi/matura-project}{GitHub}
 
 \end{document}
