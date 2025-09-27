@@ -39,10 +39,9 @@ pub const Interpreter = struct {
     // The top-most environment/stack frame
     currentEnv: *Env,
     allocator: std.mem.Allocator,
-    stdout: std.io.AnyWriter,
-    stdoutbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
-    stderr: std.io.AnyWriter,
-    stdin: std.io.AnyReader,
+    stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
+    stdin: *std.Io.Reader,
     fileName: []const u8 = "builtin",
 
     tco: bool = true,
@@ -53,16 +52,15 @@ pub const Interpreter = struct {
     pub fn init(
         allocator: std.mem.Allocator,
         initialEnv: *std.StringHashMap(Value),
-        stdout: std.io.AnyWriter,
-        stdoutbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
-        stdin: std.io.AnyReader,
-        stderr: std.io.AnyWriter,
+        stdout: *std.Io.Writer,
+        stdin: *std.Io.Reader,
+        stderr: *std.Io.Writer,
     ) !Interpreter {
         // Put the builtin functions in the environment
         try initBuiltins(initialEnv);
         const preserveValues = try allocator.create(std.ArrayList(Value));
         errdefer allocator.destroy(preserveValues);
-        preserveValues.* = .init(allocator);
+        preserveValues.* = .empty;
         const env = try allocator.create(Env);
         env.* = .{
             .contents = initialEnv,
@@ -78,7 +76,6 @@ pub const Interpreter = struct {
             .allocator = allocator,
             .argNameMap = .init(allocator),
             .stdout = stdout,
-            .stdoutbw = stdoutbw,
             .stdin = stdin,
             .stderr = stderr,
         };
@@ -107,8 +104,8 @@ pub const Interpreter = struct {
     // Print takes a value, prints it to standard output
     // and returns Void
     fn print(self: *Interpreter, arg: Value) !Value {
-        const string = try self.listToString(arg);
-        defer string.deinit();
+        var string = try self.listToString(arg);
+        defer string.deinit(self.allocator);
         try self.stdout.print("{s}", .{string.items});
         const composite = try self.objects.makeConstruct("Void", null);
         return composite;
@@ -151,7 +148,7 @@ pub const Interpreter = struct {
     // To print a runtime error, print the trace and the error message
     // formatted in red to stderr
     fn runtimeError(self: *Interpreter, msg: []const u8) !void {
-        try self.stdoutbw.flush();
+        try self.stdout.flush();
         try self.stderr.print("\n", .{});
         try self.traceEnv(self.currentEnv, true);
         try self.stderr.print("\x1b[31;1m{s}\x1b[m\n", .{msg});
@@ -162,13 +159,19 @@ pub const Interpreter = struct {
     // linked list of characters
     fn read(self: *Interpreter, arg: Value) !Value {
         _ = arg;
-        try self.stdoutbw.flush();
-        const line = try self.stdin.readUntilDelimiterOrEofAlloc(
-            self.allocator,
+        try self.stdout.flush();
+
+        var line_writer = std.Io.Writer.Allocating.init(self.allocator);
+        defer line_writer.deinit();
+
+        _ = try self.stdin.streamDelimiterLimit(
+            &line_writer.writer,
             '\n',
-            std.math.maxInt(usize),
-        ) orelse "";
-        defer self.allocator.free(line);
+            .unlimited,
+        );
+
+        const line = line_writer.written();
+
         var listVal = try self.objects.makeConstruct("Nil", null);
         for (1..line.len + 1) |i| {
             var vals = try self.allocator.alloc(Value, 2);
@@ -184,11 +187,11 @@ pub const Interpreter = struct {
 
     // This converts a linked list of chars to a zig array of chars
     fn listToString(self: *Interpreter, list: Value) !std.ArrayList(u8) {
-        var values = std.ArrayList(u8).init(self.allocator);
-        errdefer values.deinit();
+        var values = std.ArrayList(u8).empty;
+        errdefer values.deinit(self.allocator);
         var rest = list;
         while (std.mem.eql(u8, rest.construct.name, "Cons")) {
-            try values.append(rest.construct.values.?[0].char);
+            try values.append(self.allocator, rest.construct.values.?[0].char);
             rest = rest.construct.values.?[1];
         }
         return values;
@@ -211,8 +214,8 @@ pub const Interpreter = struct {
 
     // This converts a given Imp string to an Int
     fn parseInt(self: *Interpreter, arg: Value) !Value {
-        const string = try self.listToString(arg);
-        defer string.deinit();
+        var string = try self.listToString(arg);
+        defer string.deinit(self.allocator);
         const number: i64 = std.fmt.parseInt(i64, string.items, 10) catch {
             return try self.objects.makeConstruct("None", null);
         };
@@ -224,8 +227,8 @@ pub const Interpreter = struct {
 
     // This converts a given Imp string to a Float
     fn parseFloat(self: *Interpreter, arg: Value) !Value {
-        const string = try self.listToString(arg);
-        defer string.deinit();
+        var string = try self.listToString(arg);
+        defer string.deinit(self.allocator);
         const number: f64 = std.fmt.parseFloat(f64, string.items) catch {
             return try self.objects.makeConstruct("None", null);
         };
@@ -267,7 +270,7 @@ pub const Interpreter = struct {
 
     // Free all objects and created argName strings
     pub fn deinit(self: *Interpreter) void {
-        self.preserveValues.deinit();
+        self.preserveValues.deinit(self.allocator);
         self.allocator.destroy(self.preserveValues);
         self.objects.deinit();
         self.deinitEnvs();
@@ -276,14 +279,14 @@ pub const Interpreter = struct {
             for (argNames.value_ptr.items) |argName| {
                 self.allocator.free(argName.lexeme);
             }
-            argNames.value_ptr.deinit();
+            argNames.value_ptr.deinit(self.allocator);
         }
         self.argNameMap.deinit();
     }
 
     // Push the values to preserve them from being freed
     inline fn pushValue(self: *Interpreter, val: Value) !void {
-        try self.preserveValues.append(val);
+        try self.preserveValues.append(self.allocator, val);
     }
 
     // Remove the value from the stack
@@ -628,7 +631,7 @@ pub const Interpreter = struct {
                                     .object = closObj,
                                 } };
                             }
-                            var copiedArgs = try multiClos.argNames.clone();
+                            var copiedArgs = try multiClos.argNames.clone(self.allocator);
                             _ = copiedArgs.pop();
                             try self.pushValue(argument);
                             const multiArgClos = try self.objects.makeMultiArgClosure(copiedArgs, copiedEnv, multiClos.code);
@@ -692,9 +695,9 @@ pub const Interpreter = struct {
                         // tail call optimization
                         if (tailPosition and self.tco and numArgs == multiClos.argNames.items.len) {
                             var i: usize = 0;
-                            var arguments: std.ArrayList(Value) = .init(self.allocator);
-                            try arguments.resize(numArgs);
-                            defer arguments.deinit();
+                            var arguments: std.ArrayList(Value) = .empty;
+                            try arguments.resize(self.allocator, numArgs);
+                            defer arguments.deinit(self.allocator);
                             while (i < numArgs) : (i += 1) {
                                 const argument = args.items[endI - i - 1];
                                 const arg = try self.eval(argument, false);
@@ -786,8 +789,8 @@ pub const Interpreter = struct {
                                 closure.content.closure.name = multiClos.name;
                                 return .{ .value = .{ .object = closure } };
                             }
-                            var copiedArgs = try multiClos.argNames.clone();
-                            errdefer copiedArgs.deinit();
+                            var copiedArgs = try multiClos.argNames.clone(self.allocator);
+                            errdefer copiedArgs.deinit(self.allocator);
                             i = 0;
                             while (i < numArgs) : (i += 1) {
                                 _ = copiedArgs.pop();
@@ -846,12 +849,12 @@ pub const Interpreter = struct {
     // Evaluate an expression
     pub fn eval(self: *Interpreter, ast: *AST, tailPosition: bool) anyerror!Value {
         var toEval: *AST = ast;
-        var cleanup: std.ArrayList([]const u8) = .init(self.allocator);
+        var cleanup: std.ArrayList([]const u8) = .empty;
         defer {
             for (cleanup.items) |toClean| {
                 self.remove(toClean);
             }
-            cleanup.deinit();
+            cleanup.deinit(self.allocator);
         }
         while (true) {
             switch (toEval.*) {
@@ -901,7 +904,7 @@ pub const Interpreter = struct {
                 },
                 .let => |let| {
                     try self.evalLetDefinition(let.name, let.be);
-                    try cleanup.append(let.name.lexeme);
+                    try cleanup.append(self.allocator, let.name.lexeme);
                     toEval = let.in;
                 },
                 .call => |call| {
@@ -950,7 +953,7 @@ pub const Interpreter = struct {
                         try boundEnv.put(enclosed[i], self.lookup(enclosed[i]).?);
                     }
                     const closure = try self.objects.makeMultiArgClosure(
-                        try lambdaMult.argnames.clone(),
+                        try lambdaMult.argnames.clone(self.allocator),
                         boundEnv,
                         .{ .ast = lambdaMult.expr },
                     );
@@ -1017,7 +1020,7 @@ pub const Interpreter = struct {
                             if (construct.values) |constructValues| {
                                 for (constructValues, pattern.values.items) |val, name| {
                                     try self.set(name.lexeme, val);
-                                    try cleanup.append(name.lexeme);
+                                    try cleanup.append(self.allocator, name.lexeme);
                                 }
                             }
                             toEval = body;
@@ -1046,7 +1049,7 @@ pub const Interpreter = struct {
                         try self.set(constructor.name.lexeme, construct);
                         return;
                     }
-                    try self.argNameMap.put(constructor.name.lexeme, .init(self.allocator));
+                    try self.argNameMap.put(constructor.name.lexeme, .empty);
                     var argNames = self.argNameMap.getPtr(constructor.name.lexeme).?;
 
                     // Args to the constructor are named like _Constructor0
@@ -1056,16 +1059,23 @@ pub const Interpreter = struct {
                             constructor.args.items.len - i - 1,
                         });
                         errdefer self.allocator.free(argName);
-                        try argNames.append(.{ .start = 0, .end = 0, .lexeme = argName, .type = .Identifier });
+                        try argNames.append(
+                            self.allocator,
+                            .{ .start = 0, .end = 0, .lexeme = argName, .type = .Identifier },
+                        );
                     }
                     var bound = std.StringHashMap(Value).init(self.allocator);
                     errdefer bound.deinit();
 
                     // Create a multi-argument closure with the body being the constructor
-                    const multiArgClosure = try self.objects.makeMultiArgClosure(try argNames.clone(), bound, .{ .constructor = .{
-                        .numArgs = constructor.args.items.len,
-                        .name = constructor.name.lexeme,
-                    } });
+                    const multiArgClosure = try self.objects.makeMultiArgClosure(
+                        try argNames.clone(self.allocator),
+                        bound,
+                        .{ .constructor = .{
+                            .numArgs = constructor.args.items.len,
+                            .name = constructor.name.lexeme,
+                        } },
+                    );
                     multiArgClosure.content.multiArgClosure.name = constructor.name.lexeme;
                     try self.set(constructor.name.lexeme, .{ .object = multiArgClosure });
                 }

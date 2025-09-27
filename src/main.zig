@@ -26,14 +26,16 @@ pub fn main() !u8 {
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
 
-    // Initialize stdin and stdout
-    const stdout_file = std.io.getStdOut().writer().any();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    var stdoutBuffer: [2048]u8 = undefined;
 
-    const stderr_file = std.io.getStdErr().writer().any();
-    var errbw = std.io.bufferedWriter(stderr_file);
-    const stderr = errbw.writer();
+    // Initialize stdin and stdout
+    var stdout_writer = std.fs.File.stdout().writer(&stdoutBuffer);
+    const stdout = &stdout_writer.interface;
+
+    var stderrBuffer: [2048]u8 = undefined;
+
+    var stderr_writer = std.fs.File.stderr().writer(&stderrBuffer);
+    const stderr = &stderr_writer.interface;
 
     // Read commandline options
     const consoleArgs = try std.process.argsAlloc(allocator);
@@ -43,13 +45,13 @@ pub fn main() !u8 {
     if (consoleArgs.len != 2) {
         try stderr.print("Wrong number of arguments supplied.\n", .{});
         try stderr.print("Usage: matura-project file\n", .{});
-        try errbw.flush();
+        try stderr.flush();
         return MainError.WrongUsage;
     }
 
     // Create error handler
     var errs: errors.Errors = .{
-        .stderr = stderr.any(),
+        .stderr = stderr,
         .source = undefined,
         .fileName = undefined,
         .allocator = allocator,
@@ -58,8 +60,10 @@ pub fn main() !u8 {
     defer errs.deinit();
 
     // Get standard input
-    const stdin = std.io.getStdIn().reader();
-    var stdinBW = std.io.bufferedReader(stdin);
+    var stdinBuffer: [2048]u8 = undefined;
+
+    var stdin_reader = std.fs.File.stdin().reader(&stdinBuffer);
+    const stdin = &stdin_reader.interface;
 
     // Create runner
     var fileRunner = runner.Runner.init(allocator);
@@ -78,10 +82,9 @@ pub fn main() !u8 {
     var interpreter_ = try interpreter.Interpreter.init(
         allocator,
         &initialEnv,
-        stdout.any(),
-        &bw,
-        stdinBW.reader().any(),
-        stderr.any(),
+        stdout,
+        stdin,
+        stderr,
     );
     defer interpreter_.deinit();
 
@@ -98,7 +101,7 @@ pub fn main() !u8 {
     var builtin = binDir.openDir("../lib/matura-project/builtin", .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => {
             try stderr.print("Lib folder is not in the parent folder of the binary", .{});
-            try errbw.flush();
+            try stderr.flush();
             return 1;
         },
         else => {
@@ -122,7 +125,6 @@ pub fn main() !u8 {
                 &fileParser,
                 &algorithmJ,
                 &errs,
-                &errbw,
             )) |returnCode| {
                 return returnCode;
             }
@@ -135,7 +137,7 @@ pub fn main() !u8 {
     var stdlib = binDir.openDir("../lib/matura-project/stdlib", .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => {
             try stderr.print("Lib folder is not in the parent folder of the binary", .{});
-            try errbw.flush();
+            try stderr.flush();
             return 1;
         },
         else => {
@@ -159,7 +161,6 @@ pub fn main() !u8 {
                 &fileParser,
                 &algorithmJ,
                 &errs,
-                &errbw,
             )) |returnCode| {
                 return returnCode;
             }
@@ -172,7 +173,7 @@ pub fn main() !u8 {
         switch (err) {
             error.FileNotFound => {
                 try stderr.print("File {s} does not exist.\n", .{consoleArgs[1]});
-                try errbw.flush();
+                try stderr.flush();
                 return 1;
             },
             else => {},
@@ -190,7 +191,6 @@ pub fn main() !u8 {
         &fileParser,
         &algorithmJ,
         &errs,
-        &errbw,
     )) |returnCode| {
         return returnCode;
     }
@@ -198,8 +198,7 @@ pub fn main() !u8 {
     const checkResult = try fileRunner.checkStatements(
         &algorithmJ,
         &errs,
-        stderr.any(),
-        &errbw,
+        stderr,
     );
 
     var mainType = switch (checkResult) {
@@ -210,7 +209,7 @@ pub fn main() !u8 {
     };
     defer mainType.deinit(allocator);
 
-    if (compile) {
+    if (false) {
         var monomorphizer = try monomorphization.Monomorphizer.init(
             allocator,
             &algorithmJ,
@@ -240,7 +239,7 @@ pub fn main() !u8 {
             &errorMessage,
         ) != 0) {
             try stderr.print("{s}", .{errorMessage});
-            try errbw.flush();
+            try stderr.flush();
             return 1;
         }
 
@@ -275,21 +274,21 @@ pub fn main() !u8 {
     } else {
         try fileRunner.optimize(false);
 
-        if (try fileRunner.run(&interpreter_, &errbw)) |returnCode| {
+        if (try fileRunner.run(&interpreter_, stderr)) |returnCode| {
             return returnCode;
         }
 
         // Run the main function
         interpreter_.runMain() catch |err| switch (err) {
             error.Overflow, error.UnknownIdentifier => {
-                try errbw.flush();
+                try stderr.flush();
                 return 1;
             },
             else => {
                 return err;
             },
         };
-        try bw.flush();
+        try stdout.flush();
     }
 
     return 0;

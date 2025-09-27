@@ -62,11 +62,11 @@ pub const Type = struct {
                 .number => |num| {
                     num.variable.deinit(allocator);
                 },
-                .composite => |comp| {
+                .composite => |*comp| {
                     for (comp.args.items) |arg| {
                         arg.deinit(allocator);
                     }
-                    comp.args.deinit();
+                    comp.args.deinit(allocator);
                 },
             }
             allocator.destroy(self);
@@ -145,7 +145,7 @@ fn collectConstraintsAndTypeVars(
 // Print all the constraints that a type has
 pub fn printConstraints(
     t: *Type,
-    writer: std.io.AnyWriter,
+    writer: *std.Io.Writer,
     currentTypeVar: *usize,
     typeVarMap: *std.AutoHashMap(usize, usize),
     allocator: std.mem.Allocator,
@@ -175,7 +175,7 @@ pub fn printConstraints(
 // Print the type with Number constraints left out
 pub fn printTypeWithoutConstraints(
     t: *Type,
-    writer: std.io.AnyWriter,
+    writer: *std.Io.Writer,
     currentTypeVar: *usize,
     typeVarMap: *std.AutoHashMap(usize, usize),
     topLevel: bool,
@@ -241,7 +241,7 @@ pub fn printTypeWithoutConstraints(
 // Print the whole type
 pub fn printType(
     t: *Type,
-    writer: std.io.AnyWriter,
+    writer: *std.Io.Writer,
     currentTypeVar: *usize,
     typeVarMap: *std.AutoHashMap(usize, usize),
     topLevel: bool,
@@ -754,19 +754,22 @@ pub const AlgorithmJ = struct {
             .composite => |composite| {
                 const t = try Type.init(self.allocator);
                 errdefer self.allocator.destroy(t);
-                var copiedArgs = std.ArrayList(*Type).init(self.allocator);
+                var copiedArgs = std.ArrayList(*Type).empty;
                 errdefer {
                     for (copiedArgs.items) |arg| {
                         arg.deinit(self.allocator);
                     }
-                    copiedArgs.deinit();
+                    copiedArgs.deinit(self.allocator);
                 }
                 for (composite.args.items) |arg| {
-                    try copiedArgs.append(try self.copyAndReplace(
-                        arg,
-                        replacementMap,
-                        copyMap,
-                    ));
+                    try copiedArgs.append(
+                        self.allocator,
+                        try self.copyAndReplace(
+                            arg,
+                            replacementMap,
+                            copyMap,
+                        ),
+                    );
                 }
                 t.data = .{ .composite = .{
                     .name = composite.name,
@@ -1428,7 +1431,7 @@ pub const AlgorithmJ = struct {
                         self.allocator,
                         pattern.values.items.len,
                     );
-                    errdefer matchedTypes.deinit();
+                    errdefer matchedTypes.deinit(self.allocator);
                     errdefer for (matchedTypes.items) |matchedType| {
                         matchedType.deinit(self.allocator);
                     };
@@ -1459,7 +1462,7 @@ pub const AlgorithmJ = struct {
                                 func.from.rc += 1;
                                 try self.globalTypes.put(value.lexeme, valueScheme);
                                 func.from.rc += 1;
-                                try matchedTypes.append(func.from);
+                                try matchedTypes.append(self.allocator, func.from);
                                 constrType = func.to;
                             },
                             else => {
@@ -1551,9 +1554,9 @@ pub const AlgorithmJ = struct {
                         },
                     };
                 }
-                var listArgs = std.ArrayList(*Type).init(self.allocator);
-                errdefer listArgs.deinit();
-                try listArgs.append(t);
+                var listArgs = std.ArrayList(*Type).empty;
+                errdefer listArgs.deinit(self.allocator);
+                try listArgs.append(self.allocator, t);
                 const listType = try Type.init(self.allocator);
                 listType.data = .{ .composite = .{
                     .name = "List",
@@ -1598,7 +1601,7 @@ pub const AlgorithmJ = struct {
             .type => |*typeDecl| {
                 const prevDepth = self.depth;
                 self.depth = std.math.maxInt(usize);
-                typeDecl.constructorTypeSchemes = .init(self.allocator);
+                typeDecl.constructorTypeSchemes = .empty;
                 for (typeDecl.constructors.items) |constructor| {
                     if (self.globalTypes.contains(constructor.name.lexeme)) {
                         try self.errors.errorAt(
@@ -1638,8 +1641,14 @@ pub const AlgorithmJ = struct {
                         constructorType.* = .{ .type = currentType };
                     }
                     errdefer constructorType.forall.typeVars.deinit();
-                    try self.constructorToType.put(constructor.name.lexeme, typeDecl.name.lexeme);
-                    try typeDecl.constructorTypeSchemes.?.append(constructorType);
+                    try self.constructorToType.put(
+                        constructor.name.lexeme,
+                        typeDecl.name.lexeme,
+                    );
+                    try typeDecl.constructorTypeSchemes.?.append(
+                        self.allocator,
+                        constructorType,
+                    );
                     try self.globalTypes.put(constructor.name.lexeme, constructorType);
                 }
                 self.depth = prevDepth;

@@ -19,25 +19,25 @@ pub const Runner = struct {
 
     pub fn init(allocator: std.mem.Allocator) Runner {
         return .{
-            .sources = .init(allocator),
-            .statements = .init(allocator),
-            .fileNames = .init(allocator),
-            .startOfFiles = .init(allocator),
+            .sources = .empty,
+            .statements = .empty,
+            .fileNames = .empty,
+            .startOfFiles = .empty,
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Runner) void {
-        ast.Statement.deinitStatements(self.statements, self.allocator);
+        ast.Statement.deinitStatements(&self.statements, self.allocator);
         for (self.sources.items) |source| {
             self.allocator.free(source);
         }
-        self.sources.deinit();
+        self.sources.deinit(self.allocator);
         for (self.fileNames.items) |fileName| {
             self.allocator.free(fileName);
         }
-        self.fileNames.deinit();
-        self.startOfFiles.deinit();
+        self.fileNames.deinit(self.allocator);
+        self.startOfFiles.deinit(self.allocator);
     }
 
     pub fn appendFile(
@@ -47,15 +47,14 @@ pub const Runner = struct {
         fileParser: *parser.Parser,
         algorithmJ: *type_inference.AlgorithmJ,
         errs: *errors.Errors,
-        errbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
     ) !?u8 {
         // The file name has been allocated and needs to be freed
-        try self.fileNames.append(fileName);
-        try self.startOfFiles.append(self.statements.items.len);
+        try self.fileNames.append(self.allocator, fileName);
+        try self.startOfFiles.append(self.allocator, self.statements.items.len);
         const fileContents = try file.readToEndAlloc(self.allocator, std.math.maxInt(usize));
         {
             errdefer self.allocator.free(fileContents);
-            try self.sources.append(fileContents);
+            try self.sources.append(self.allocator, fileContents);
         }
         // Change the source code of errors and the parser
         errs.newSource(fileName, fileContents);
@@ -66,7 +65,7 @@ pub const Runner = struct {
         // Parse the file
         fileParser.appendFile(&self.statements) catch |err| switch (err) {
             error.InvalidChar, error.UnexpectedToken, error.InvalidPrefix => {
-                try errbw.flush();
+                try errs.stderr.flush();
                 return 1;
             },
             else => {
@@ -81,8 +80,7 @@ pub const Runner = struct {
         self: *Runner,
         algorithmJ: *type_inference.AlgorithmJ,
         errs: *errors.Errors,
-        stderr: std.io.AnyWriter,
-        errbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
+        stderr: *std.Io.Writer,
     ) !union(enum) {
         returnCode: u8,
         mainType: *type_inference.Type,
@@ -116,7 +114,7 @@ pub const Runner = struct {
                 error.TooGeneral,
                 error.NonExhaustiveMatch,
                 => {
-                    try errbw.flush();
+                    try stderr.flush();
                     return .{ .returnCode = 1 };
                 },
                 else => {
@@ -129,12 +127,12 @@ pub const Runner = struct {
         // Check that a main function exists and has the type Void -> Void
         if (algorithmJ.globalTypes.get("main") == null) {
             try errs.printError("No 'main' defined", .{});
-            try errbw.flush();
+            try stderr.flush();
             return .{ .returnCode = 1 };
         }
 
         const vType = try type_inference.Type.init(self.allocator);
-        vType.data = .{ .composite = .{ .name = "Void", .args = .init(self.allocator) } };
+        vType.data = .{ .composite = .{ .name = "Void", .args = .empty } };
         const fType = type_inference.Type.init(self.allocator) catch |err| {
             vType.deinit(self.allocator);
             return err;
@@ -171,7 +169,7 @@ pub const Runner = struct {
                     true,
                     self.allocator,
                 );
-                try errbw.flush();
+                try stderr.flush();
                 return .{ .returnCode = 1 };
             },
             else => {
@@ -191,7 +189,7 @@ pub const Runner = struct {
     pub fn run(
         self: *Runner,
         interpreter_: *interpreter.Interpreter,
-        errbw: *std.io.BufferedWriter(4096, std.io.AnyWriter),
+        stderr: *std.Io.Writer,
     ) !?u8 {
         var startOfNextFile: usize = undefined;
         if (self.startOfFiles.items.len > 1) {
@@ -216,7 +214,7 @@ pub const Runner = struct {
             }
             interpreter_.runStatement(statement) catch |err| switch (err) {
                 error.Overflow, error.UnknownIdentifier => {
-                    try errbw.flush();
+                    try stderr.flush();
                     return 1;
                 },
                 else => {

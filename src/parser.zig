@@ -211,18 +211,18 @@ pub const Parser = struct {
                     );
                     return error.UnexpectedToken;
                 }
-                var args: std.ArrayList(*type_inference.Type) = .init(self.allocator);
+                var args: std.ArrayList(*type_inference.Type) = .empty;
                 errdefer {
                     for (args.items) |arg| {
                         arg.deinit(self.allocator);
                     }
-                    args.deinit();
+                    args.deinit(self.allocator);
                 }
                 var i: usize = 0;
                 while (i < compositeType.numVars) : (i += 1) {
                     var _region: utils.Region = .{ .start = 0, .end = 0 };
                     const arg = try self.typeExpr(&_region, declaredVars, 1);
-                    try args.append(arg);
+                    try args.append(self.allocator, arg);
                     region.end = _region.end;
                 }
                 currentType.data = .{ .composite = .{ .name = tN.lexeme, .args = args } };
@@ -283,7 +283,7 @@ pub const Parser = struct {
     pub fn appendFile(self: *Parser, statements: *std.ArrayList(Statement)) !void {
         while (self.peekToken().type != .EOF) {
             const stmt = try self.statement();
-            try statements.append(stmt);
+            try statements.append(self.allocator, stmt);
             switch (self.peekToken().type) {
                 .NewStatement => {
                     _ = try self.getToken();
@@ -403,16 +403,16 @@ pub const Parser = struct {
     // constructor ::= Name typeExpr*
     fn constructor(self: *Parser) !?Statement.Constructor {
         if (self.typeName()) |constructorName| {
-            var args = std.ArrayList(*type_inference.Type).init(self.allocator);
+            var args = std.ArrayList(*type_inference.Type).empty;
             errdefer {
                 for (args.items) |arg| {
                     arg.deinit(self.allocator);
                 }
-                args.deinit();
+                args.deinit(self.allocator);
             }
             var region: utils.Region = .{ .start = 0, .end = 0 };
             while (self.peekToken().type == .Identifier or self.peekToken().type == .LeftParen) {
-                try args.append(try self.typeExpr(&region, true, 1));
+                try args.append(self.allocator, try self.typeExpr(&region, true, 1));
             }
             return .{ .name = constructorName, .args = args };
         }
@@ -449,12 +449,12 @@ pub const Parser = struct {
         }
 
         var numTypeVars: usize = 0;
-        var typeArgs = std.ArrayList(*type_inference.Type).init(self.allocator);
+        var typeArgs = std.ArrayList(*type_inference.Type).empty;
         errdefer {
             for (typeArgs.items) |t| {
                 t.deinit(self.allocator);
             }
-            typeArgs.deinit();
+            typeArgs.deinit(self.allocator);
         }
 
         while (self.typeVar()) |typeVarArg| {
@@ -467,7 +467,7 @@ pub const Parser = struct {
             tV.* = self.algorithmJ.newVarT();
             errdefer tV.deinit(self.allocator);
             try self.typeVarMap.?.put(typeVarArg.lexeme, tV);
-            try typeArgs.append(tV);
+            try typeArgs.append(self.allocator, tV);
             tV.rc += 1;
         }
 
@@ -479,21 +479,21 @@ pub const Parser = struct {
 
         _ = try self.expectToken(.Equal);
 
-        var constructors = std.ArrayList(Statement.Constructor).init(self.allocator);
+        var constructors = std.ArrayList(Statement.Constructor).empty;
         errdefer {
-            for (constructors.items) |c| {
+            for (constructors.items) |*c| {
                 for (c.args.items) |arg| {
                     arg.deinit(self.allocator);
                 }
-                c.args.deinit();
+                c.args.deinit(self.allocator);
             }
-            constructors.deinit();
+            constructors.deinit(self.allocator);
         }
         var constructorMap = std.StringArrayHashMap(bool).init(self.allocator);
         errdefer constructorMap.deinit();
         var c = try self.constructor();
         if (c) |constructor_| {
-            try constructors.append(constructor_);
+            try constructors.append(self.allocator, constructor_);
             try constructorMap.put(constructor_.name.lexeme, false);
         } else {
             try self.errs.errorAt(
@@ -508,7 +508,7 @@ pub const Parser = struct {
             _ = try self.getToken();
             c = try self.constructor();
             if (c) |constructor_| {
-                try constructors.append(constructor_);
+                try constructors.append(self.allocator, constructor_);
                 try constructorMap.put(constructor_.name.lexeme, false);
             } else {
                 try self.errs.errorAt(
@@ -638,12 +638,12 @@ pub const Parser = struct {
     // A string is syntax sugar for a list of chars
     fn stringLiteral(self: *Parser) !*AST {
         const t = try self.getToken();
-        var chars = std.ArrayList(*AST).init(self.allocator);
+        var chars = std.ArrayList(*AST).empty;
         errdefer {
             for (chars.items) |char| {
                 char.deinit(self.allocator);
             }
-            chars.deinit();
+            chars.deinit(self.allocator);
         }
         var i: usize = 1;
         while (i < t.lexeme.len - 1) : (i += 1) {
@@ -673,7 +673,7 @@ pub const Parser = struct {
                 },
                 .value = value,
             } };
-            try chars.append(charLit);
+            try chars.append(self.allocator, charLit);
             i += len - 1;
         }
         const stringList = try self.allocator.create(AST);
@@ -820,9 +820,9 @@ pub const Parser = struct {
     fn pattern(self: *Parser) !Pattern {
         if (self.peekToken().type == .Identifier) {
             const constructorName = try self.getToken();
-            var args = std.ArrayList(token.Token).init(self.allocator);
+            var args = std.ArrayList(token.Token).empty;
             while (self.peekToken().type == .Identifier) {
-                try args.append(try self.getToken());
+                try args.append(self.allocator, try self.getToken());
             }
             return .{
                 .name = constructorName,
@@ -844,28 +844,28 @@ pub const Parser = struct {
         const value = try self.expression(0);
         errdefer value.deinit(self.allocator);
         _ = try self.expectToken(.Of);
-        var patterns = std.ArrayList(Pattern).init(self.allocator);
+        var patterns = std.ArrayList(Pattern).empty;
         errdefer {
             for (patterns.items) |*currentPattern| {
                 currentPattern.deinit(self.allocator);
             }
-            patterns.deinit();
+            patterns.deinit(self.allocator);
         }
-        var bodies = std.ArrayList(*AST).init(self.allocator);
+        var bodies = std.ArrayList(*AST).empty;
         errdefer {
             for (bodies.items) |body| {
                 body.deinit(self.allocator);
             }
-            bodies.deinit();
+            bodies.deinit(self.allocator);
         }
-        try patterns.append(try self.pattern());
+        try patterns.append(self.allocator, try self.pattern());
         _ = try self.expectToken(.DoubleArrow);
-        try bodies.append(try self.expression(0));
+        try bodies.append(self.allocator, try self.expression(0));
         while (self.peekToken().type == .VBar) {
             _ = try self.getToken();
-            try patterns.append(try self.pattern());
+            try patterns.append(self.allocator, try self.pattern());
             _ = try self.expectToken(.DoubleArrow);
-            try bodies.append(try self.expression(0));
+            try bodies.append(self.allocator, try self.expression(0));
         }
         const caseAST = try self.allocator.create(AST);
         caseAST.* = .{ .case = .{
@@ -900,23 +900,23 @@ pub const Parser = struct {
     fn list(self: *Parser) !*AST {
         const start = (try self.getToken()).start;
 
-        var exprs = std.ArrayList(*AST).init(self.allocator);
+        var exprs = std.ArrayList(*AST).empty;
         errdefer {
             for (exprs.items) |expr| {
                 expr.deinit(self.allocator);
             }
-            exprs.deinit();
+            exprs.deinit(self.allocator);
         }
 
         {
             if (self.peekToken().type != .RightBracket) {
-                try exprs.append(try self.expression(0));
+                try exprs.append(self.allocator, try self.expression(0));
             }
 
             while (self.peekToken().type == .Comma) {
                 _ = try self.getToken();
                 if (self.peekToken().type != .RightBracket) {
-                    try exprs.append(try self.expression(0));
+                    try exprs.append(self.allocator, try self.expression(0));
                 }
             }
         }

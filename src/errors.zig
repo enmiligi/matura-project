@@ -7,7 +7,7 @@ const utils = @import("./utils.zig");
 pub const Errors = struct {
     fileName: []const u8,
     source: []const u8,
-    stderr: std.io.AnyWriter,
+    stderr: *std.Io.Writer,
     allocator: std.mem.Allocator,
     errorOcurred: bool = false,
 
@@ -113,7 +113,12 @@ pub const Errors = struct {
         try self.stderr.print("\x1b[22m", .{});
     }
 
-    fn printConstraints(self: *Errors, t: *type_inference.Type, writer: std.io.AnyWriter, currentTypeVar: *usize) !void {
+    fn printConstraints(
+        self: *Errors,
+        t: *type_inference.Type,
+        writer: *std.Io.Writer,
+        currentTypeVar: *usize,
+    ) !void {
         try writer.print("\x1b[32;1m", .{});
         try type_inference.printConstraints(t, writer, currentTypeVar, &self.typeVarMap, self.allocator);
         try writer.print("\x1b[32m", .{});
@@ -121,7 +126,14 @@ pub const Errors = struct {
 
     // Types are written in bold
     // and yellow if it matches and red for the mismatched subtype
-    fn printType(self: *Errors, t: *type_inference.Type, writer: std.io.AnyWriter, currentTypeVar: *usize, err: bool, topLevel: bool) !void {
+    fn printType(
+        self: *Errors,
+        t: *type_inference.Type,
+        writer: *std.Io.Writer,
+        currentTypeVar: *usize,
+        err: bool,
+        topLevel: bool,
+    ) !void {
         if (err) {
             try writer.print("\x1b[33;1m", .{});
         } else {
@@ -137,8 +149,8 @@ pub const Errors = struct {
         self: *Errors,
         leftType: *type_inference.Type,
         rightType: *type_inference.Type,
-        leftWriter: std.io.AnyWriter,
-        rightWriter: std.io.AnyWriter,
+        leftWriter: *std.Io.Writer,
+        rightWriter: *std.Io.Writer,
         currentTypeVar: *usize,
         topLevel: bool,
     ) !void {
@@ -332,20 +344,23 @@ pub const Errors = struct {
         leftType: *type_inference.Type,
         rightType: *type_inference.Type,
     ) !struct { left: std.ArrayList(u8), right: std.ArrayList(u8) } {
-        var leftString = std.ArrayList(u8).init(self.allocator);
-        var rightString = std.ArrayList(u8).init(self.allocator);
         var currentTypeVar: usize = 0;
-        var leftWriter = leftString.writer();
-        var rightWriter = rightString.writer();
+        var leftWriterAlloc = std.Io.Writer.Allocating.init(self.allocator);
+        var rightWriterAlloc = std.Io.Writer.Allocating.init(self.allocator);
+        var leftWriter = &leftWriterAlloc.writer;
+        var rightWriter = &rightWriterAlloc.writer;
         try leftWriter.print("\x1b[32m", .{});
         try rightWriter.print("\x1b[32m", .{});
-        try self.printConstraints(leftType, leftWriter.any(), &currentTypeVar);
+        try self.printConstraints(leftType, leftWriter, &currentTypeVar);
         currentTypeVar = 0;
-        try self.printConstraints(rightType, rightWriter.any(), &currentTypeVar);
-        try self.compareTypes(leftType, rightType, leftWriter.any(), rightWriter.any(), &currentTypeVar, true);
+        try self.printConstraints(rightType, rightWriter, &currentTypeVar);
+        try self.compareTypes(leftType, rightType, leftWriter, rightWriter, &currentTypeVar, true);
         try leftWriter.print("\x1b[39m", .{});
         try rightWriter.print("\x1b[39m", .{});
-        return .{ .left = leftString, .right = rightString };
+        return .{
+            .left = leftWriterAlloc.toArrayList(),
+            .right = rightWriterAlloc.toArrayList(),
+        };
     }
 
     // This error is printed when the type of a recursive value
@@ -357,9 +372,9 @@ pub const Errors = struct {
         leftType: *type_inference.Type,
         rightType: *type_inference.Type,
     ) !void {
-        const comparedTypes = try self.stringCompareTypes(leftType, rightType);
-        defer comparedTypes.left.deinit();
-        defer comparedTypes.right.deinit();
+        var comparedTypes = try self.stringCompareTypes(leftType, rightType);
+        defer comparedTypes.left.deinit(self.allocator);
+        defer comparedTypes.right.deinit(self.allocator);
         try self.indicateAST(
             ast,
             "The type of {s} when recursing seems to be {s},\nbut {s} is the type inferred when set,\nwhich leads to an infinite type",
@@ -376,9 +391,9 @@ pub const Errors = struct {
         leftType: *type_inference.Type,
         rightType: *type_inference.Type,
     ) !void {
-        const comparedTypes = try self.stringCompareTypes(leftType, rightType);
-        defer comparedTypes.left.deinit();
-        defer comparedTypes.right.deinit();
+        var comparedTypes = try self.stringCompareTypes(leftType, rightType);
+        defer comparedTypes.left.deinit(self.allocator);
+        defer comparedTypes.right.deinit(self.allocator);
         try self.indicateAST(
             ast,
             "The type of {s} when recursing seems to be {s},\nbut {s} is the type it has",
@@ -397,9 +412,9 @@ pub const Errors = struct {
         reason: []const u8,
         reasonAt: utils.Region,
     ) !void {
-        const comparedTypes = try self.stringCompareTypes(leftType, rightType);
-        defer comparedTypes.left.deinit();
-        defer comparedTypes.right.deinit();
+        var comparedTypes = try self.stringCompareTypes(leftType, rightType);
+        defer comparedTypes.left.deinit(self.allocator);
+        defer comparedTypes.right.deinit(self.allocator);
         try self.indicateRegion(codeRegion, "The type of this is: {s}", .{comparedTypes.left.items}, true);
         try self.printBold("which {s}: {s},\nbecause {s}\n", .{ err, comparedTypes.right.items, reason });
         try self.indicateRegion(reasonAt, "", .{}, false);
@@ -457,9 +472,9 @@ pub const Errors = struct {
         rightType: *type_inference.Type,
         reasonWhyEqual: []const u8,
     ) !void {
-        const comparedTypes = try self.stringCompareTypes(leftType, rightType);
-        defer comparedTypes.left.deinit();
-        defer comparedTypes.right.deinit();
+        var comparedTypes = try self.stringCompareTypes(leftType, rightType);
+        defer comparedTypes.left.deinit(self.allocator);
+        defer comparedTypes.right.deinit(self.allocator);
         try self.indicateAST(astLeft, "The type of this is: {s}", .{comparedTypes.left.items}, true);
         try self.indicateAST(astRight, "which should match this type: {s}", .{comparedTypes.right.items}, false);
         try self.printBold("because {s}\n", .{reasonWhyEqual});

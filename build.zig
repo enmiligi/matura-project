@@ -48,7 +48,7 @@ pub fn build(b: *std.Build) !void {
 
     if (compile) {
         exe.linkLibC();
-        exe.linkSystemLibrary("LLVM-19");
+        exe.linkSystemLibrary("LLVM-20");
     }
 
     // This declares intent for the executable to be installed into the

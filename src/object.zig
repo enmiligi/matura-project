@@ -52,7 +52,7 @@ pub const Object = struct {
             },
             .multiArgClosure => |*multiClos| {
                 multiClos.bound.deinit();
-                multiClos.argNames.deinit();
+                multiClos.argNames.deinit(allocator);
             },
             else => {},
         }
@@ -196,11 +196,11 @@ pub const Objects = struct {
             }
         }
         var constructIterator = self.constructArrays.iterator();
-        var toFree = std.ArrayList([*]Value).init(self.allocator);
-        defer toFree.deinit();
+        var toFree = std.ArrayList([*]Value).empty;
+        defer toFree.deinit(self.allocator);
         while (constructIterator.next()) |constructValues| {
             if (!constructValues.value_ptr.marked) {
-                try toFree.append(constructValues.key_ptr.*);
+                try toFree.append(self.allocator, constructValues.key_ptr.*);
             }
             constructValues.value_ptr.marked = false;
         }

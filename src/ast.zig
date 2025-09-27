@@ -26,12 +26,12 @@ pub const Pattern = struct {
     }
 
     pub fn deinit(self: *Pattern, allocator: std.mem.Allocator) void {
-        self.values.deinit();
-        if (self.types) |types| {
+        self.values.deinit(allocator);
+        if (self.types) |*types| {
             for (types.items) |t| {
                 t.deinit(allocator);
             }
-            types.deinit();
+            types.deinit(allocator);
         }
     }
 };
@@ -132,7 +132,7 @@ pub const AST = union(enum) {
     // Recursively destroy all contained ASTs
     pub fn deinit(self: *AST, allocator: std.mem.Allocator) void {
         switch (self.*) {
-            .let => |let| {
+            .let => |*let| {
                 let.be.deinit(allocator);
                 let.in.deinit(allocator);
                 if (let.type) |t| {
@@ -141,29 +141,29 @@ pub const AST = union(enum) {
                 if (let.actualType) |scheme| {
                     type_inference.deinitScheme(scheme, allocator);
                 }
-                if (let.instantiations) |instantiations| {
+                if (let.instantiations) |*instantiations| {
                     for (instantiations.items) |instantiation| {
                         allocator.free(instantiation);
                     }
-                    instantiations.deinit();
+                    instantiations.deinit(allocator);
                 }
-                if (let.monomorphizations) |monomorphizations| {
+                if (let.monomorphizations) |*monomorphizations| {
                     for (monomorphizations.items) |monomorphization| {
                         monomorphization.deinit(allocator);
                     }
-                    monomorphizations.deinit();
+                    monomorphizations.deinit(allocator);
                 }
             },
-            .lambda => |lambda| {
+            .lambda => |*lambda| {
                 lambda.expr.deinit(allocator);
-                if (lambda.encloses) |encloses| {
-                    encloses.deinit();
+                if (lambda.encloses) |*encloses| {
+                    encloses.deinit(allocator);
                 }
-                if (lambda.enclosesTypes) |types| {
+                if (lambda.enclosesTypes) |*types| {
                     for (types.items) |t| {
                         t.deinit(allocator);
                     }
-                    types.deinit();
+                    types.deinit(allocator);
                 }
                 if (lambda.argType) |argType| {
                     argType.type.deinit(allocator);
@@ -172,10 +172,10 @@ pub const AST = union(enum) {
                     t.deinit(allocator);
                 }
             },
-            .lambdaMult => |lambdaMult| {
+            .lambdaMult => |*lambdaMult| {
                 lambdaMult.expr.deinit(allocator);
-                lambdaMult.argnames.deinit();
-                lambdaMult.encloses.deinit();
+                lambdaMult.argnames.deinit(allocator);
+                lambdaMult.encloses.deinit(allocator);
             },
             .call => |call| {
                 call.function.deinit(allocator);
@@ -184,12 +184,12 @@ pub const AST = union(enum) {
                     t.deinit(allocator);
                 }
             },
-            .callMult => |callMult| {
+            .callMult => |*callMult| {
                 callMult.function.deinit(allocator);
                 for (callMult.args.items) |arg| {
                     arg.deinit(allocator);
                 }
-                callMult.args.deinit();
+                callMult.args.deinit(allocator);
             },
             .operator => |op| {
                 op.left.deinit(allocator);
@@ -212,7 +212,7 @@ pub const AST = union(enum) {
                     argType.deinit(allocator);
                 }
             },
-            .case => |case| {
+            .case => |*case| {
                 case.value.deinit(allocator);
                 if (case.valueType) |valueType| {
                     valueType.deinit(allocator);
@@ -223,17 +223,17 @@ pub const AST = union(enum) {
                 for (case.patterns.items) |*pattern| {
                     pattern.deinit(allocator);
                 }
-                case.patterns.deinit();
+                case.patterns.deinit(allocator);
                 for (case.bodies.items) |body| {
                     body.deinit(allocator);
                 }
-                case.bodies.deinit();
+                case.bodies.deinit(allocator);
             },
-            .list => |list| {
+            .list => |*list| {
                 for (list.values.items) |value| {
                     value.deinit(allocator);
                 }
-                list.values.deinit();
+                list.values.deinit(allocator);
                 if (list.nilType) |nilType| {
                     nilType.deinit(allocator);
                 }
@@ -403,57 +403,57 @@ pub const Statement = union(enum) {
     // Recursively destroy all contained ASTs
     pub fn deinit(self: *Statement, allocator: std.mem.Allocator) void {
         switch (self.*) {
-            .let => |let| {
+            .let => |*let| {
                 let.be.deinit(allocator);
                 if (let.annotation) |tA| {
                     tA.type.deinit(allocator);
                 }
-                if (let.instantiations) |instantiations| {
+                if (let.instantiations) |*instantiations| {
                     for (instantiations.items) |instantiation| {
                         allocator.free(instantiation);
                     }
-                    instantiations.deinit();
+                    instantiations.deinit(allocator);
                 }
-                if (let.monomorphizations) |monomorphizations| {
+                if (let.monomorphizations) |*monomorphizations| {
                     for (monomorphizations.items) |monomorphization| {
                         monomorphization.deinit(allocator);
                     }
-                    monomorphizations.deinit();
+                    monomorphizations.deinit(allocator);
                 }
             },
-            .type => |t| {
-                for (t.constructors.items) |constructor| {
+            .type => |*t| {
+                for (t.constructors.items) |*constructor| {
                     for (constructor.args.items) |arg| {
                         arg.deinit(allocator);
                     }
-                    constructor.args.deinit();
+                    constructor.args.deinit(allocator);
                 }
-                t.constructors.deinit();
+                t.constructors.deinit(allocator);
                 t.compositeType.deinit(allocator);
-                if (t.constructorInstantiations) |constructorInsts| {
-                    for (constructorInsts) |insts| {
+                if (t.constructorInstantiations) |*constructorInsts| {
+                    for (constructorInsts.*) |*insts| {
                         for (insts.items) |inst| {
                             allocator.free(inst);
                         }
-                        insts.deinit();
+                        insts.deinit(allocator);
                     }
-                    allocator.free(constructorInsts);
+                    allocator.free(constructorInsts.*);
                 }
-                if (t.constructorTypeSchemes) |tSs| {
-                    tSs.deinit();
+                if (t.constructorTypeSchemes) |*tSs| {
+                    tSs.deinit(allocator);
                 }
-                if (t.monomorphizations) |monos| {
-                    for (monos.items) |mono| {
-                        for (mono.constructors.items) |constructor| {
+                if (t.monomorphizations) |*monos| {
+                    for (monos.items) |*mono| {
+                        for (mono.constructors.items) |*constructor| {
                             allocator.free(constructor.name.lexeme);
                             for (constructor.args.items) |arg| {
                                 arg.deinit(allocator);
                             }
-                            constructor.args.deinit();
+                            constructor.args.deinit(allocator);
                         }
-                        mono.constructors.deinit();
+                        mono.constructors.deinit(allocator);
                     }
-                    monos.deinit();
+                    monos.deinit(allocator);
                 }
             },
         }
@@ -499,10 +499,10 @@ pub const Statement = union(enum) {
         }
     }
 
-    pub fn deinitStatements(statements: std.ArrayList(Statement), allocator: std.mem.Allocator) void {
+    pub fn deinitStatements(statements: *std.ArrayList(Statement), allocator: std.mem.Allocator) void {
         for (statements.items) |*statement| {
             statement.deinit(allocator);
         }
-        statements.deinit();
+        statements.deinit(allocator);
     }
 };

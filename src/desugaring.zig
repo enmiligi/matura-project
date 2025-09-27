@@ -6,7 +6,7 @@ const Statement = @import("ast.zig").Statement;
 pub const ConvertList = struct {
     pub fn run(ast: *AST, allocator: std.mem.Allocator) !void {
         switch (ast.*) {
-            .list => |list| {
+            .list => |*list| {
                 var listExpr = try allocator.create(AST);
                 listExpr.* = .{ .identifier = .{
                     .token = .{
@@ -53,7 +53,7 @@ pub const ConvertList = struct {
                     } };
                     listExpr = secondCall;
                 }
-                list.values.deinit();
+                list.values.deinit(allocator);
                 list.consType.?.deinit(allocator);
                 ast.* = listExpr.*;
                 allocator.destroy(listExpr);

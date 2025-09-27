@@ -13,6 +13,7 @@ pub const OptimizeClosures = struct {
         found: *std.ArrayList([]const u8),
         foundTypes: *std.ArrayList(*Type),
         exclude: *std.StringHashMap(void),
+        allocator: std.mem.Allocator,
     ) !void {
         switch (ast.*) {
             .intConstant, .floatConstant, .boolConstant, .charConstant => {},
@@ -25,53 +26,77 @@ pub const OptimizeClosures = struct {
                     name = id.token.lexeme[start..];
                 }
                 if (!exclude.contains(name)) {
-                    try found.append(id.token.lexeme);
+                    try found.append(allocator, id.token.lexeme);
                     id.idType.?.rc += 1;
-                    try foundTypes.append(id.idType.?);
+                    try foundTypes.append(allocator, id.idType.?);
                 }
             },
             .let => |let| {
                 try exclude.put(let.name.lexeme, undefined);
                 if (let.monomorphizations) |monomorphizations| {
                     for (monomorphizations.items) |monomorphization| {
-                        try findEnclosed(monomorphization, found, foundTypes, exclude);
+                        try findEnclosed(monomorphization, found, foundTypes, exclude, allocator);
                     }
                 } else {
-                    try findEnclosed(let.be, found, foundTypes, exclude);
+                    try findEnclosed(let.be, found, foundTypes, exclude, allocator);
                 }
-                try findEnclosed(let.in, found, foundTypes, exclude);
+                try findEnclosed(let.in, found, foundTypes, exclude, allocator);
             },
             .ifExpr => |ifExpr| {
-                try findEnclosed(ifExpr.predicate, found, foundTypes, exclude);
-                try findEnclosed(ifExpr.thenExpr, found, foundTypes, exclude);
-                try findEnclosed(ifExpr.elseExpr, found, foundTypes, exclude);
+                try findEnclosed(ifExpr.predicate, found, foundTypes, exclude, allocator);
+                try findEnclosed(ifExpr.thenExpr, found, foundTypes, exclude, allocator);
+                try findEnclosed(ifExpr.elseExpr, found, foundTypes, exclude, allocator);
             },
             .call => |call| {
-                try findEnclosed(call.function, found, foundTypes, exclude);
-                try findEnclosed(call.arg, found, foundTypes, exclude);
+                try findEnclosed(call.function, found, foundTypes, exclude, allocator);
+                try findEnclosed(call.arg, found, foundTypes, exclude, allocator);
             },
             .operator => |op| {
-                try findEnclosed(op.left, found, foundTypes, exclude);
-                try findEnclosed(op.right, found, foundTypes, exclude);
+                try findEnclosed(op.left, found, foundTypes, exclude, allocator);
+                try findEnclosed(op.right, found, foundTypes, exclude, allocator);
             },
             .prefixOp => |prefixOp| {
-                try findEnclosed(prefixOp.expr, found, foundTypes, exclude);
+                try findEnclosed(
+                    prefixOp.expr,
+                    found,
+                    foundTypes,
+                    exclude,
+                    allocator,
+                );
             },
             .lambda => |lambda| {
                 const alreadyPresent = exclude.contains(lambda.argname.lexeme);
                 try exclude.put(lambda.argname.lexeme, undefined);
-                try findEnclosed(lambda.expr, found, foundTypes, exclude);
+                try findEnclosed(
+                    lambda.expr,
+                    found,
+                    foundTypes,
+                    exclude,
+                    allocator,
+                );
                 if (!alreadyPresent) {
                     _ = exclude.remove(lambda.argname.lexeme);
                 }
             },
             .case => |case| {
-                try findEnclosed(case.value, found, foundTypes, exclude);
+                try findEnclosed(
+                    case.value,
+                    found,
+                    foundTypes,
+                    exclude,
+                    allocator,
+                );
                 for (case.patterns.items, case.bodies.items) |pattern, body| {
                     for (pattern.values.items) |value| {
                         try exclude.put(value.lexeme, undefined);
                     }
-                    try findEnclosed(body, found, foundTypes, exclude);
+                    try findEnclosed(
+                        body,
+                        found,
+                        foundTypes,
+                        exclude,
+                        allocator,
+                    );
                     for (pattern.values.items) |value| {
                         _ = exclude.remove(value.lexeme);
                     }
@@ -111,14 +136,20 @@ pub const OptimizeClosures = struct {
                 try run(op.right, allocator);
             },
             .lambda => |*lambda| {
-                var found = std.ArrayList([]const u8).init(allocator);
-                errdefer found.deinit();
-                var foundTypes = std.ArrayList(*Type).init(allocator);
-                errdefer foundTypes.deinit();
+                var found = std.ArrayList([]const u8).empty;
+                errdefer found.deinit(allocator);
+                var foundTypes = std.ArrayList(*Type).empty;
+                errdefer foundTypes.deinit(allocator);
                 var exclude = std.StringHashMap(void).init(allocator);
                 defer exclude.deinit();
                 try exclude.put(lambda.argname.lexeme, undefined);
-                try findEnclosed(ast, &found, &foundTypes, &exclude);
+                try findEnclosed(
+                    ast,
+                    &found,
+                    &foundTypes,
+                    &exclude,
+                    allocator,
+                );
                 lambda.encloses = found;
                 lambda.enclosesTypes = foundTypes;
                 try run(lambda.expr, allocator);
@@ -148,10 +179,10 @@ pub const OptimizeFullyInstantiatedCalls = struct {
         } };
         var currentExpr = ast;
         var isCall = true;
-        var arguments = std.ArrayList(*AST).init(allocator);
+        var arguments = std.ArrayList(*AST).empty;
         while (isCall) {
             errdefer currentExpr.deinit(allocator);
-            try arguments.append(currentExpr.call.arg);
+            try arguments.append(allocator, currentExpr.call.arg);
             currentExpr = currentExpr.call.function;
             switch (currentExpr.*) {
                 .call => {
@@ -202,27 +233,27 @@ pub const OptimizeFullyInstantiatedCalls = struct {
                 try combineLambdas(ast.lambda.expr, allocator);
                 arguments = ast.lambda.expr.lambdaMult.argnames;
                 expr = ast.lambda.expr.lambdaMult.expr;
-                ast.lambda.expr.lambdaMult.encloses.deinit();
+                ast.lambda.expr.lambdaMult.encloses.deinit(allocator);
                 allocator.destroy(ast.lambda.expr);
             },
             else => {
-                arguments = .init(allocator);
+                arguments = .empty;
                 expr = ast.lambda.expr;
             },
         }
         if (ast.lambda.argType) |argType| {
             argType.type.deinit(allocator);
         }
-        if (ast.lambda.enclosesTypes) |enclosesTypes| {
+        if (ast.lambda.enclosesTypes) |*enclosesTypes| {
             for (enclosesTypes.items) |t| {
                 t.deinit(allocator);
             }
-            enclosesTypes.deinit();
+            enclosesTypes.deinit(allocator);
         }
         if (ast.lambda.type) |t| {
             t.deinit(allocator);
         }
-        try arguments.append(ast.lambda.argname);
+        try arguments.append(allocator, ast.lambda.argname);
         const start = ast.lambda.start;
         const encloses = ast.lambda.encloses.?;
         ast.* = .{ .lambdaMult = .{
