@@ -142,7 +142,7 @@ pub const Compiler = struct {
                 self.allocator,
                 monomorphizations.items.len,
             );
-            errdefer monomorphizationNames.deinit();
+            errdefer monomorphizationNames.deinit(self.allocator);
             errdefer for (monomorphizationNames.items) |monomorphizationName| {
                 self.allocator.free(monomorphizationName);
             };
@@ -153,7 +153,7 @@ pub const Compiler = struct {
                     .{ i, name },
                 );
                 errdefer self.allocator.free(monomorphizationName);
-                try monomorphizationNames.append(monomorphizationName);
+                try monomorphizationNames.append(self.allocator, monomorphizationName);
             }
             for (monomorphizations.items, 0..) |monomorphization, i| {
                 try self.putValue(monomorphization, monomorphizationNames.items[i]);
@@ -195,17 +195,20 @@ pub const Compiler = struct {
                 const argType = self.impToLLVMType(lambda.type.?.data.function.from);
                 const returnType = self.impToLLVMType(lambda.type.?.data.function.to);
                 const prevFunction = self.function;
-                var impEnclosed = std.ArrayList(c.LLVMTypeRef).init(self.allocator);
-                defer impEnclosed.deinit();
+                var impEnclosed = std.ArrayList(c.LLVMTypeRef).empty;
+                defer impEnclosed.deinit(self.allocator);
                 const originalFunctionNumber = self.currentFunction;
                 for (lambda.enclosesTypes.?.items, lambda.encloses.?.items) |t, id| {
                     if (self.idToFunctionNumber.get(id)) |functionNumber| {
                         if (functionNumber != self.currentFunction) {
-                            try impEnclosed.append(c.LLVMPointerType(c.LLVMInt8Type(), 0));
+                            try impEnclosed.append(
+                                self.allocator,
+                                c.LLVMPointerType(c.LLVMInt8Type(), 0),
+                            );
                         }
                         continue;
                     }
-                    try impEnclosed.append(self.impToLLVMType(t));
+                    try impEnclosed.append(self.allocator, self.impToLLVMType(t));
                 }
                 const boundStruct = c.LLVMStructType(impEnclosed.items.ptr, @intCast(impEnclosed.items.len), 0);
                 const boundPtr = c.LLVMPointerType(boundStruct, 0);
@@ -226,10 +229,10 @@ pub const Compiler = struct {
                 const originalBuilderPos = c.LLVMGetInsertBlock(self.builder);
                 c.LLVMPositionBuilderAtEnd(self.builder, functionBB);
                 self.function = function;
-                var preBoundVals = std.ArrayList(c.LLVMValueRef).init(self.allocator);
-                defer preBoundVals.deinit();
+                var preBoundVals = std.ArrayList(c.LLVMValueRef).empty;
+                defer preBoundVals.deinit(self.allocator);
                 for (lambda.encloses.?.items) |name| {
-                    try preBoundVals.append(self.idToValue.get(name) orelse undefined);
+                    try preBoundVals.append(self.allocator, self.idToValue.get(name) orelse undefined);
                 }
                 var enclosedRecursion: usize = 0;
                 for (lambda.encloses.?.items, 0..) |name, i| {
@@ -499,17 +502,17 @@ pub const Compiler = struct {
                 }
             },
             .let => |let| {
-                const toFreeAndDelete = try self.compileLet(
+                var toFreeAndDelete = try self.compileLet(
                     let.name.lexeme,
                     let.be,
                     let.monomorphizations,
                 );
-                defer if (toFreeAndDelete) |names| {
+                defer if (toFreeAndDelete) |*names| {
                     for (names.items) |name| {
                         _ = self.idToValue.remove(name);
                         self.allocator.free(name);
                     }
-                    names.deinit();
+                    names.deinit(self.allocator);
                 };
                 return self.compileExpr(let.in);
             },
@@ -1147,17 +1150,17 @@ pub const Compiler = struct {
         for (statements.items) |statement| {
             switch (statement) {
                 .let => |let| {
-                    const toFreeAndDelete = try self.compileLet(
+                    var toFreeAndDelete = try self.compileLet(
                         let.name.lexeme,
                         let.be,
                         let.monomorphizations,
                     );
-                    if (toFreeAndDelete) |names| {
-                        defer names.deinit();
+                    if (toFreeAndDelete) |*names| {
+                        defer names.deinit(self.allocator);
                         errdefer for (names.items) |name| {
                             self.allocator.free(name);
                         };
-                        try self.namesToFree.appendSlice(names.items);
+                        try self.namesToFree.appendSlice(self.allocator, names.items);
                     }
                 },
                 .type => |t| {
@@ -1166,13 +1169,13 @@ pub const Compiler = struct {
                             self.allocator,
                             monos.items.len,
                         );
-                        errdefer structTypes.deinit();
+                        errdefer structTypes.deinit(self.allocator);
                         for (monos.items) |mono| {
                             const structType = try self.enumType(
                                 t.name.lexeme,
                                 mono.constructors,
                             );
-                            try structTypes.append(structType);
+                            try structTypes.append(self.allocator, structType);
                         }
                         try self.nameToMonomorphizations.put(
                             t.name.lexeme,
@@ -1212,7 +1215,7 @@ pub const Compiler = struct {
                                 constructorNum,
                                 t.constructors.items.len,
                                 originalBB,
-                            );
+                            );const
                         }
                     }
                 },
@@ -1364,7 +1367,7 @@ pub const Compiler = struct {
             .stringType = stringType,
             .idToValue = .init(allocator),
             .idToFunctionNumber = .init(allocator),
-            .namesToFree = .init(allocator),
+            .namesToFree = .empty,
             .nameToMonomorphizations = .init(allocator),
             .nameToTagInfo = .init(allocator),
             .currentFunction = 0,
@@ -1518,13 +1521,13 @@ pub const Compiler = struct {
         for (self.namesToFree.items) |name| {
             self.allocator.free(name);
         }
-        self.namesToFree.deinit();
+        self.namesToFree.deinit(self.allocator);
         self.nameToTagInfo.deinit();
         var iterator = self.nameToMonomorphizations.valueIterator();
         while (iterator.next()) |val| {
             switch (val.*) {
-                .monos => |monos| {
-                    monos.llvmTypes.deinit();
+                .monos => |*monos| {
+                    monos.llvmTypes.deinit(self.allocator);
                 },
                 else => {},
             }

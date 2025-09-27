@@ -209,7 +209,7 @@ pub fn main() !u8 {
     };
     defer mainType.deinit(allocator);
 
-    if (false) {
+    if (compile) {
         var monomorphizer = try monomorphization.Monomorphizer.init(
             allocator,
             &algorithmJ,
