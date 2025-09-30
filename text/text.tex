@@ -5,36 +5,79 @@
 \usepackage[top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm]{geometry}
 \usepackage{mathptmx}
 \usepackage{enumitem}
+\usepackage[style=ieee]{biblatex}
+\usepackage{xcolor}
 \usepackage{listings}
-\usepackage{minted}
 \usepackage{dirtree}
+
 \hypersetup{
       colorlinks=true,
 }
 \setlist{nosep}
 
+\addbibresource{bibliography.bib}
+
 \title{A functional programming language\\Maturaarbeit}
 \author{Enea Giger\\Betreuungsperson: Adrian Lüthi}
 \date{Gymnasium Burgdorf\\\today}
 
+\newcommand{\importListing}[1]{
+    \begin{minipage}{\linewidth}
+    \input{#1}
+    \end{minipage}
+}
 
 \begin{document}
 \maketitle
 \newpage
 
 \begin{abstract}
-      I describe the creation of a new functional programming language called Imp
-      heavily based on the language ML
+	This paper describes the creation of a new functional programming language
+	with both an interpreter and a compiler called Imp from scratch.
+	The language is aimed to be relatively simple, so it could be used as a
+	teaching tool.
+	It describes the essential architecture and algorithms used for those
+	implementations.
+	The language is written almost exclusively in the relatively new language
+	Zig.
 \end{abstract}
 
 \tableofcontents
 \newpage
 
-
 \section{Introduction}
+In todays world, computers are omnipresent. Everything depends on them.
+And all these computers have to be programmed to do something useful.
+Those programs need to be written in some language, which today most
+often are languages like C++, JavaScript or Python.
+But with recent developments, it seems that parallelism is getting more
+and more important. Nowadays, most of the progress in CPUs stems not from
+improved performance in a core, but from increasing the number of cores included.
+Yet in most languages used to program nowadays, parallelism is usually hard to introduce.
+
+Functional programming languages solve this problem by eliminating side effects
+like mutation of variables in a function, which prevent functions to be run in
+parallel, since the output of one function might depend on the variable being mutated.
+This means that functional languages could be easier to parallelize and therefore
+become very important in the future.
+
+The main goal of this project was therefore to devise a functional language
+and create an implementation of it.
+The principal aim for the syntax of the language was then to keep it simple,
+so it could be used to show and explain the concept of functional languages.
+Another aim was to create this implementation with as few dependencies as possible
+in order to learn all the basics from scratch.
+
+This language was to be called Imp for Impure, as Input/Output is allowed in this language
+without distinguishing functions using it from functions that do not.
 
 \section{Fundamentals}
-To understand how this programming language is different, it is important to understand how programming languages work in general.
+Though programming languages can be very different,
+the elementary steps taken in each implementation are
+still mostly the same.
+
+These next paragraphs explain the basic knowledge needed
+to understand the structure of this project.
 
 \subsection{The Lexer}
 The first step of a programming language implementation is almost always the lexer.
@@ -49,7 +92,7 @@ building an Abstract Syntax Tree (AST) out of the tokens.
 This can be done in many ways, though what methods are applicable
 depend on the syntax of the language.
 \subsubsection{Pratt Parsing}
-Pratt Parsing \cite{prattTopOperatorPrecedence1973}
+Pratt Parsing \autocite{prattTopOperatorPrecedence1973}
 is the method that is used for the expressions in this language.
 It works with a list of rules for what to do when a certain type of token is encountered
 either at the start or in the middle of an expression.
@@ -65,16 +108,16 @@ For example, if this is a negation, it also parses the argument
 by recursively calling the expression function again.
 Once this prefix is parsed the algorithm enters a loop:
 \begin{enumerate}
-      \item \label{start}
-            Lookup the next token in the in- and postfix table.
-            (This is called the left denotation in the paper.)
-            This results in a left-binding power and a function
-      \item If there is no function listed or
-            the left-binding power stored is less or equal
-            to the right-binding power, return the current expression
-      \item Otherwise, call the parsing function listed with the current expression
-            and store the result back in the current expression
-      \item Return to step \ref{start}.
+	\item \label{start}
+	      Lookup the next token in the in- and postfix table.
+	      (This is called the left denotation in the paper.)
+	      This results in a left-binding power and a function
+	\item If there is no function listed or
+	      the left-binding power stored is less or equal
+	      to the right-binding power, return the current expression
+	\item Otherwise, call the parsing function listed with the current expression
+	      and store the result back in the current expression
+	\item Return to step \ref{start}.
 \end{enumerate}
 For infix operators like multiplication, this parsing function
 will call the expression function again, but with a higher right-binding power
@@ -97,7 +140,7 @@ languages like Python.
 
 \subsubsection{Hindley-Milner type inference}
 The Hindley-Milner type inference, as described in
-\cite{damasPrincipalTypeschemesFunctional1982}
+\autocite{damasPrincipalTypeschemesFunctional1982}
 is originally a way to determine types for functions in the
 polymorphic lambda calculus with an addition of let expressions.
 
@@ -105,22 +148,22 @@ polymorphic lambda calculus with an addition of let expressions.
 The Polymorphic Lambda Calculus is a simple model for computation.
 The only operations that are possible are:
 \begin{itemize}
-      \item $\lambda x.\:e$,
-            which creates a function where $x$ is the name of the argument
-            and $e$ is an expression that is given as a result
-      \item $x$, where $x$ is the name of a variable
-            and the result is the value of that variable
-      \item $e_1\:e_2$, where both $e_1$ and $e_2$ are expressions and the result
-            is the result of the call of function $e_1$ with argument $e_2$\item $c$, where $c$ is a constant
-      \item $let\:x = e_1\:in\:e_2$, where x is the name of the variable
-            which is defined to be the result of expression $e_1$ in the scope of expression $e_2$\end{itemize}
+	\item $\lambda x.\:e$,
+	      which creates a function where $x$ is the name of the argument
+	      and $e$ is an expression that is given as a result
+	\item $x$, where $x$ is the name of a variable
+	      and the result is the value of that variable
+	\item $e_1\:e_2$, where both $e_1$ and $e_2$ are expressions and the result
+	      is the result of the call of function $e_1$ with argument $e_2$\item $c$, where $c$ is a constant
+	\item $let\:x = e_1\:in\:e_2$, where x is the name of the variable
+	      which is defined to be the result of expression $e_1$ in the scope of expression $e_2$\end{itemize}
 
 \subsubsection{The Inference Algorithm}
 The Hindley-Milner type inference algorithm computes the types of expressions
 by essentially first assuming a maximally generic type and refining it step by step
 using information like the operations used (e.g. function calls).
 If there turns out to be no type possible, the program is not well-typed.
-Important for the type system is the definition, that only let-defined variables
+Important for the type system to work is the definition that only let-defined variables
 can be polymorphic (i.e. can take on multiple different types).
 
 \subsection{The Optimizer}
@@ -134,17 +177,17 @@ The interpreter is the next step in many programming languages.
 It is a program intended to run the user-written program in the new
 language. There are many types of interpreters:
 \begin{itemize}
-      \item \textbf{Byte-Code Interpreters}, which run a
-            a custom-defined intermediate representation that is similar to how
-            machine code works, but more specific to the language. Most interpreted languages
-            use one, because it is most often the fastest possibility.
-      \item \textbf{Threaded Interpreters}, where there is no byte sequence, but pointers
-            to functions to be called or the next instruction. This has the problem that there
-            are many indirect calls and pointer indirections being done, reducing the speed.
-      \item \textbf{Abstract-Syntax-Tree Interpreters}, which directly evaluate the tree,
-            which has more information available, but might not be optimal because of syntax
-            nodes which need to be skipped and there are more indirections than
-            \textbf{Byte-Code Interpreters}
+	\item \textbf{Byte-Code Interpreters}, which run a
+	      a custom-defined intermediate representation that is similar to how
+	      machine code works, but more specific to the language. Most interpreted languages
+	      use one, because it is most often the fastest possibility.
+	\item \textbf{Threaded Interpreters}, where there is no byte sequence, but pointers
+	      to functions to be called or the next instruction. This has the problem that there
+	      are many indirect calls and pointer indirections being done, reducing the speed.
+	\item \textbf{Abstract-Syntax-Tree Interpreters}, which directly evaluate the tree,
+	      which has more information available, but might not be optimal because of syntax
+	      nodes which need to be skipped and there are more pointer indirections than
+	      \textbf{Byte-Code Interpreters}
 \end{itemize}
 Both the byte-code and threaded interpreters require a compiler.
 
@@ -166,22 +209,28 @@ like x86-based cpus (most Intel and AMD chips), ARM-based cpus, but also
 WASM (Web Assembly, a language understood by browsers).
 
 It is coded in C++, though bindings exist for several languages, most notably
-C, which can be used from many programming languages.
+for C, which many languages can interact with.
 
 \section{Implementation}
 
 \subsection{Used Software}
 
 The Software was developed using the Editors Visual Studio Code and Zed.
-Zed was used primarily, but VS Code was very useful to debug the code.
-Once Zed got Debugger support however, it was the only editor used.
+Zed was used primarily, with VSCode used for features like Debugging
+that didn't work fully in Zed.
 
 The Programming Language itself was implemented in Zig, a new low-level programming
 language that aims to improve on C. Zig was used in this project, since it has builtin
-support for tagged unions and a build system. However, for the compiler, C was still used for
+support for tagged unions and a build system. Tagged Unions were deemed important because they
+enhance type safety for things like the AST because of the different node types.
+However, for the compiler, C was still used for
 a few builtin functions.
 
-For the ability to syntax highlight code in Imp, a parser was made using tree-sitter.
+LLVM was used as a tool to compile Imp to machine code while the
+Boehm-Demers-Weiser garbage collector \autocite{GarbageCollector} was
+used to manage memory in the compiler.
+
+For the ability to syntax highlight code in Imp, an additional parser was made using tree-sitter.
 This parser is written in JavaScript. Since the grammar of the language is too complex,
 a custom lexer was also needed, which itself was written in C.
 To state what parts of the code should be colored how, Queries had to be written as well,
@@ -190,27 +239,27 @@ which are written in an unnamed language unique to Tree-sitter.
 Highlighting with Tree-sitter was chosen specifically since it is used
 in the editor Zed, enabling a custom extension to be written for Imp.
 
-This article itself was written in LaTex, while the listings are generated
-by \href{https://github.com/TomLebeda/chroma_code}{chromacode}.
+This article itself was written in LaTex, while the listings were generated
+by chromacode\autocite{lebedaTomLebedaChroma_code2025}.
 
 
 \subsection{The Language}
-\input{code/either.tex}
-\input{code/foldl.tex}
+\importListing{code/either.tex}
+\importListing{code/foldl.tex}
 
 The Syntax of the language consists of statements and expressions.
 
 There are only two types of statements.
 \begin{itemize}
-      \item Type statements, which define an algebraic data type,
-            meaning a type whose values can be constructed by various
-            constructors when given specific types.
-            These types can be generic.
-            An example can be seen in Listing \ref{listing:either}, where the type Either is defined,
-            which can be constructed by either a value of type a or of type b.
-      \item Let statements, which define an (immutable) variable
-            in the rest of the file. If the variable is assigned a
-            lambda expression, it can be recursive
+	\item Type statements, which define an algebraic data type,
+	      meaning a type whose values can be constructed by various
+	      constructors when given specific types.
+	      These types can be generic.
+	      An example can be seen in Listing \ref{listing:either}, where the type Either is defined,
+	      which can be constructed by either a value of type a or of type b.
+	\item Let statements, which define an (immutable) variable
+	      in the rest of the file. If the variable is assigned a
+	      lambda expression, it can be recursive
 \end{itemize}
 Statements are separated from expressions by not being indented,
 which has the consequence that all expressions have to be indented,
@@ -220,21 +269,21 @@ This is the only case of significant whitespace in the language.
 
 The types of expressions that exist are:
 \begin{itemize}
-      \item Lambda expressions, which work exactly
-            the same as in pure lambda calculus
-      \item Let expressions, which work the same as in pure
-            lambda calculus, except, as with the statement,
-            it can be recursive if assigned a lambda
-      \item Variables,
-      \item Function Calls,
-      \item Constants, meaning Integers (whole numbers), Floats,
-            One-Byte Unicode Characters, and Booleans,
-      \item If expressions,
-      \item Operator applications (both prefix and infix),
-      \item Case expressions, which match a value of an ADT
-            based on the Constructor,
-      \item and syntax sugar for lists and strings,
-            which are lists of characters
+	\item Lambda expressions, which work exactly
+	      the same as in pure lambda calculus
+	\item Let expressions, which work the same as in pure
+	      lambda calculus, except, as with the statement,
+	      it can be recursive if assigned a lambda
+	\item Variables,
+	\item Function Calls,
+	\item Constants, meaning Integers (whole numbers), Floats,
+	      One-Byte Unicode Characters, and Booleans,
+	\item If expressions,
+	\item Operator applications (both prefix and infix),
+	\item Case expressions, which match a value of an ADT
+	      based on the Constructor,
+	\item and syntax sugar for lists and strings,
+	      which are lists of characters
 \end{itemize}
 
 Comments start with a $\#$ sign and end with the end of the line.
@@ -249,30 +298,30 @@ allocations other than creating the AST.
 
 \subsubsection{Token Types}
 \begin{itemize}
-      \item The Keywords $let$ and $in$, $lambda$, $if$, $then$ and $else$,
-            $case$ and $of$, $or$, and $and$,
-      \item The special characters $.$, $=$, $:$, $($ and $)$, $[$ and $]$
-      \item The special sequences $->$ and $=>$,
-      \item all operators for comparison and mathematical operations,
-            and the special operator $;$,
-      \item Numbers, Booleans, Characters and Strings,
-      \item Identifiers,
-      \item and Special Tokens for new lines and the end of the file
+	\item The Keywords $let$ and $in$, $lambda$, $if$, $then$ and $else$,
+	      $case$ and $of$, $or$, and $and$,
+	\item The special characters $.$, $=$, $:$, $($ and $)$, $[$ and $]$
+	\item The special sequences $->$ and $=>$,
+	\item all operators for comparison and mathematical operations,
+	      and the special operator $;$,
+	\item Numbers, Booleans, Characters and Strings,
+	\item Identifiers,
+	\item and Special Tokens for new lines and the end of the file
 \end{itemize}
 
 \subsection{The Parser}
-\input{code/expressions.tex}
+\importListing{code/expressions.tex}
 
 The Parser consists of a pretty straight-forward implementation of the Pratt Parsing algorithm
 for the expressions as shown in Listing \ref{listing:expressions} and a simple loop for statements.
 In this implementation, the lookup table is represented by two functions,
-\mintinline{zig}|getNud| and \mintinline{zig}|getLed|.
+$getNud$ and $getLed$.
 The problem that there might not be an entry is solved by returning null
 in that case.
 
 \subsection{Type Checking/Inference}
 The Type Checker is also mostly an implementation close to the Algorithm J as described
-in the paper \cite{damasPrincipalTypeschemesFunctional1982}
+in the paper \autocite{damasPrincipalTypeschemesFunctional1982}
 There is however a significant difference to the original type system:
 There exists a special type Number(a), which can be either a Float or an Int
 and therefore can be unified by them Both. When unified, the runtime representation
@@ -280,11 +329,11 @@ is then Number(Int) or Number(Float).
 It is printed similarly to how Type Class constraints are in Haskell.
 This means that the type Number(a) is printed as \texttt{Number a => a}.
 However, in order to be able to compute free type variables for generalization
-faster, levels as described in \cite{EfficientInsightfulGeneralization} are
+faster, levels as described in \autocite{EfficientInsightfulGeneralization2022} are
 used. However, they are called depth in the code.
 
 \subsection{The Optimizer}
-\input{code/optimizer.tex}
+\importListing{code/optimizer.tex}
 
 The Optimizer works slightly different depending on whether
 the code is interpreted or compiled. In the case that it is interpreted
@@ -305,26 +354,218 @@ where the evaluation of an expression returns the next thing to
 do, which is then repeatedly evaluated in a loop until the final result
 is reached.
 
+\subsection{The Monomorphizer}
+The Monomorphizer is a step only needed for the compiler.
+It essentially eliminates all polymorphism by duplicating
+the value for each type.
+
+This is done by a simple pass over the AST, gathering
+all the types a value takes on in the body of each let expression
+or in the rest of the file and then copies the AST of the definition once for each
+type.
+
+This method is essentially the same as MLTon uses.\autocite{Monomorphise}
+
 \subsection{The Compiler}
-The Compiler converts the AST into LLVM IR using the C API through
-Zig's FFI. Here, little is done to optimize the IR created apart
-from recursive calls being done directly instead of through an indirect
-call, as all other function calls are done.
+The Compiler converts then converts this
+monomorphic AST into LLVM IR using the C API of LLVM through
+Zigs automatically generated FFI.
+
 Closures are represented in the IR as a struct consisting of two pointers:
 The first being the function pointer, the second being a pointer to the heap
 where all bound variables are stored.
-Then clang is called on the IR, linking it with a very small library of builtin
-functions with the highest optimization level of -O3.
 
+The Functions itself take two arguments each: Their actual argument
+as declared by the source code, and the environment that had been stored
+at the time of the closures creation.
+
+Here, little is done to optimize the IR created apart
+from recursive calls being done directly instead of through an indirect
+call, as all other function calls are done in order to enable
+the tail recursion optimization as it could not resolve the indirect function call
+as a recursive call since it would be given via an argument and therefore
+could theoretically be different.
+
+Then clang is called on the IR, linking it with a very small library of builtin
+functions with the highest optimization level of -O3. The tool therefore requires
+clang to be present and on the PATH.
+
+\section{Results}
+Since the language Imp is based on the typed lambda-calculus with recursion,
+it is definitely turing-complete, meaning it can compute everything any other
+language could. For example, it can be used to generate the fibonacci sequence,
+as shown in Listing \ref{listing:fibonacci}.
+
+\importListing{code/fibonacci.tex}
+
+In this example, the fibonacci sequence is computed in the function
+$fibonacciHelper$ through tail recursion. Because of that, that function
+can be viewed as a loop which changes the variables $previous$, $current$ and
+$n$ on each iteration. This change is done on line 6.
+
+Throughout its execution, it also prints the current fibonacci number
+computed using the two builtin functions $showInt$ and $print$.
+$showInt$ is a function that converts an integer into a list of characters.
+
+Several expressions are separated by a semicolon ($;$) which is an operator
+in this language that simply discards the result on the left, meaning
+the expression on the left is only there for its side-effects like printing.
+
+The main function takes a dummy argument x, because in Imp, there are no
+functions that take no argument. This function is then called
+after all definitions have been executed.
+On line 17 it then reads the number of elements requested,
+which is then parsed. As this can fail, this returns a
+value of type Option. The case expression then evaluates either line
+18, if the parse failed, which just repeats the main function,
+or it puts the result into the variable n which is then used in
+lines 20-23. Finally on line 24, Void is returned, since Imp functions
+also need to return exactly one value.
+
+This example also demonstrates the power of Hindley-Milner type inference,
+because no types did ever need to be annotated for the code to work,
+but it is still garanteed that the whole program has no type errors.
+The type given to fibonacciHelper is only there for clarity.
+
+Other examples of Imp code can be found in the folder examples of
+in the source code.
+
+To get a view of how the LLVM IR transformation might work, here is
+an example of the resulting IR of a simple function,
+though cleaned up to remove clutter and add meaningful names.
+
+\begin{minipage}{\linewidth}
+	\input{code/addImp.tex}
+	\input{code/addLLVM.tex}
+\end{minipage}
+
+So the first lambda defined on line 2 of Listing \ref{listing:addImp} got transformed
+into the function $@add$ of Listing \ref{listing:addLLVM}.
+As the second lambda binds the value of $x$, $@add$ allocates
+enough memory to store it on lines 3-5, then gets the exact location on line 6, which
+is done since there might be more than one bound variable, but in this case is redundant.
+Line 7 then stores $x$ while line 8 creates the closure by inserting the pointer to the bound
+variable in a struct.
+Finally on line 9, the closure is returned.
+
+The function $@add_const$ then acesses this bound variable, again first getting the
+location on the redundant line 14, then loads the actual value of $x$ on line 15
+and finally computes the result on line 16 which is returned on line 17.
+
+This IR will then get optimized in the final compilation by clang,
+oftentimes eliminating the indirect function call through the closure.
 \section{Discussion}
+As seen in the example given, the language is fully functional and
+can be used for mathematical computation. However, there are also several
+shortcomings that will be mentioned here.
+
+\subsection{Shortcomings}\label{shortcomings}
+The language Imp is a functioning prototype, but there are several
+aspects which would need to be treated in order for this language
+to be useful for any practical purposes.
+
+\subsubsection{Input/output}
+Input/output is an essential part of any programming language.
+The language Imp is no exception to this, having the two functions
+$print$ and $read$ which print to standard output and read from
+standard input respectively. However, there is currently no way
+to read from or write to files, which is essential for a program
+to store information for later usages of it or to load and/or output larger
+amounts of information.
+
+To enable this feature, a type for Files or Buffers would have to be
+introduced for fast, type-safe interaction.
+
+\subsubsection{Library System}
+In Imp, it is impossible to import other files from a program.
+This would be essential however for the development of libraries.
+To enable imports and therefore libraries, a topological sorting
+algorithm could be used, since the order of definitions does
+matter in this language and circular references can't exist anyway.
+
+This would enable a much more practical implementation of the standard
+library as well, since e.g. functions that operate on functions could be used
+in almost all other parts of the library.
+
+\subsubsection{FFI}
+At the moment, Imp cannot access system libraries or libraries
+written in other languages at all, meaning GUIs or even most TUIs
+(terminal user interfaces) are impossible to create,
+since you couldn't use libraries like QT.
+
+This could be mitigated by a large set of builtin functions based
+on which a standard library could be built, or more simply, though
+less securely, using an FFI (foreign function interface).
+
+Using a foreign function interface, one could declare functions that
+exist in another language (most likely C), and their types and then use
+those functions. This would lead to other challenges however, since
+there exists no equivalent to many of the types in C.
+The types would however need to match up exactly,
+putting a huge burden on both the programmer writing the declarations
+as there should be no type errors, otherwise the whole type system
+would be for nothing, and the compiler, as it would no longer
+be free to represent its objects however it wants.
+LLVM does also not garantee correct FFI, even if the types
+seem to match up.
+
+\subsubsection{OS Compatibility}
+As the Compiler of this language depends on both
+LLVM and Boehm GC, it can only be used on Operating Systems
+that support both of these. However, Linux, MacOS and Windows
+are all supported by them both.
+
+Windows has however the problem of there not being
+a prebuilt package for LLVM which includes the headers as well
+as the libraries to be linked. This means that any
+user on windows wanting to try the compiler
+must first build LLVM for himself at the moment.
+
+\subsection{Room for improvement}
+There are many parts of both the compiler and the
+interpreter, which could be improved significantly
+for enhanced speed and better memory consumption.
+
+\subsubsection{Garbage Collector}
+Though both the compiler and the interpreter produce
+garbage collected programs, the compiler uses the
+Boehm-Demers-Weiser GC \autocite{GarbageCollector},
+which is unaware of any of the types of Imp and therefore
+has to assume that anything that could be a pointer,
+is in fact a pointer.
+Meanwhile, the interpreter uses a very basic mark-and-sweep
+Garbage Collector. However this could very easily be improved
+by using methods like Generational Garbage Collection, where
+young objects are checked more often than older ones.
+
+\subsubsection{Defunctionalization}
+Furthermore, another possible optimization done by almost all
+functional programming languages nowadays, is some form of
+defunctionalization, which is a process which tries
+to eliminate functions as arguments, replacing them with
+an object that is given as an argument which denotes which
+function it represents.
+
+One new interesting approach that seems to be promising
+is the technique of lambda set specialization
+\autocite{brandonBetterDefunctionalizationLambda2023a}, which
+could be applied to this language relatively easily,
+since it assumes a Hindley-Milner style type inference
+as well.
 
 \section{Conclusions}
+In conclusion, all the goals were met and the project was a success.
+Though there were a few roadblocks, especially concerning LLVM,
+the language is now fully functional and able to be tested by anyone.
+There are a few aspects that would need to be improved for it to be
+useful for anything practical as explained in section \ref{shortcomings},
+it is already a fully useable language that could be used as a teaching
+tool.
 
 \newpage
-\bibliographystyle{IEEEtran}
-\bibliography{bibliography}
+\printbibliography
 
-\listoflistings
+\lstlistoflistings
 
 \appendix
 \section{Source Code}

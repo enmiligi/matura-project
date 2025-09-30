@@ -270,7 +270,7 @@ pub fn main() !u8 {
         try cmd.spawn();
         _ = try cmd.wait();
 
-        try cwd.deleteFile("a.out.ll");
+        //try cwd.deleteFile("a.out.ll");
     } else {
         try fileRunner.optimize(false);
 
