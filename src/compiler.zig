@@ -1215,7 +1215,7 @@ pub const Compiler = struct {
                                 constructorNum,
                                 t.constructors.items.len,
                                 originalBB,
-                            );const
+                            );
                         }
                     }
                 },

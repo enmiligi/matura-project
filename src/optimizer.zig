@@ -6,7 +6,7 @@ const Type = @import("./type_inference.zig").Type;
 
 // Create a list of bound variables for each closure
 // so not the entire env has to be cloned
-pub const OptimizeClosures = struct {
+pub const GatherBound = struct {
     // Search all referenced variables that have not been declared inside
     fn findEnclosed(
         ast: *AST,
@@ -171,7 +171,7 @@ pub const OptimizeClosures = struct {
 };
 
 // Convert consecutive lambdas or calls into one object
-pub const OptimizeFullyInstantiatedCalls = struct {
+pub const CombineCallsAndLambdas = struct {
     fn combineCalls(ast: *AST, allocator: std.mem.Allocator) !void {
         errdefer ast.* = .{ .boolConstant = .{
             .token = .{ .type = .BoolLiteral, .start = 0, .end = 0, .lexeme = "" },
@@ -330,14 +330,14 @@ pub fn optimizeStatement(statement: *Statement, allocator: std.mem.Allocator, in
         .let => |let| {
             if (let.monomorphizations) |monomorphizations| {
                 for (monomorphizations.items) |monomorphization| {
-                    try OptimizeClosures.run(monomorphization, allocator);
+                    try GatherBound.run(monomorphization, allocator);
                     if (interpreted)
-                        try OptimizeFullyInstantiatedCalls.run(monomorphization, allocator);
+                        try CombineCallsAndLambdas.run(monomorphization, allocator);
                 }
             } else {
-                try OptimizeClosures.run(let.be, allocator);
+                try GatherBound.run(let.be, allocator);
                 if (interpreted)
-                    try OptimizeFullyInstantiatedCalls.run(let.be, allocator);
+                    try CombineCallsAndLambdas.run(let.be, allocator);
             }
         },
         .type => {},
