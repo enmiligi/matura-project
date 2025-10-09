@@ -582,14 +582,6 @@ pub const AlgorithmJ = struct {
                 if (typeVarA.subst) |substitutedA| {
                     try self.unify(substitutedA, typeB);
                 } else {
-                    switch (typeB.data) {
-                        .typeVar => |_| {
-                            if (typeA == typeB) {
-                                return;
-                            }
-                        },
-                        else => {},
-                    }
                     try addSubstitution(typeVarA, typeB);
                 }
             },
@@ -607,9 +599,6 @@ pub const AlgorithmJ = struct {
                             return error.CouldNotUnify;
                         }
                     },
-                    .function => |_| {
-                        return error.CouldNotUnify;
-                    },
                     .number => |numB| {
                         switch (primitiveA) {
                             .Int, .Float => {
@@ -620,16 +609,13 @@ pub const AlgorithmJ = struct {
                             },
                         }
                     },
-                    .composite => {
+                    .function, .composite => {
                         return error.CouldNotUnify;
                     },
                 }
             },
             .function => |functionA| {
                 switch (typeB.data) {
-                    .primitive => |_| {
-                        return error.CouldNotUnify;
-                    },
                     .function => |functionB| {
                         try self.unify(functionA.from, functionB.from);
                         try self.unify(functionA.to, functionB.to);
@@ -641,10 +627,7 @@ pub const AlgorithmJ = struct {
                             try addSubstitution(typeVarB, typeA);
                         }
                     },
-                    .number => {
-                        return error.CouldNotUnify;
-                    },
-                    .composite => {
+                    .primitive, .number, .composite => {
                         return error.CouldNotUnify;
                     },
                 }
@@ -661,16 +644,13 @@ pub const AlgorithmJ = struct {
                             },
                         }
                     },
-                    .function => {
-                        return error.CouldNotUnify;
-                    },
                     .typeVar => {
                         try self.unify(typeB, typeA);
                     },
                     .number => |numB| {
                         try self.unify(numA.variable, numB.variable);
                     },
-                    .composite => {
+                    .function, .composite => {
                         return error.CouldNotUnify;
                     },
                 }

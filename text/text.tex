@@ -29,18 +29,17 @@
 
 \begin{document}
 \maketitle
-\newpage
-
 \begin{abstract}
-	This paper describes the creation of a new functional programming language
-	with both an interpreter and a compiler called Imp from scratch.
-	The language is aimed to be relatively simple, so it could be used as a
-	teaching tool.
+	This paper describes the creation of a new functional programming language called Imp
+	and both an interpreter and a compiler for it from scratch.
 	It describes the essential architecture and algorithms used for those
-	implementations.
-	The language is written almost exclusively in the relatively new language
+	implementations including transformation to LLVM IR and tail call optimization.
+	The language itself is aimed to be relatively simple
+	and is written almost exclusively in the relatively new language
 	Zig.
 \end{abstract}
+\newpage
+
 
 \tableofcontents
 \newpage
@@ -49,63 +48,71 @@
 In todays world, computers are omnipresent. Everything depends on them.
 And all these computers have to be programmed to do something useful.
 Those programs need to be written in some language, which today most
-often are languages like C++, JavaScript or Python.
-But with recent developments, it seems that parallelism is getting more
+often are imperative languages like C++, JavaScript or Python.
+But as recent developments show, parallelism is getting more
 and more important. Nowadays, most of the progress in CPUs stems not from
-improved performance in a core, but from increasing the number of cores included.
-Yet in most languages used to program nowadays, parallelism is usually hard to introduce.
+improved performance per core, but from increasing the number of cores included.
+Yet in the languages most used to program, parallelism is usually hard to introduce
+and requires massive work to introduce because of issues like race conditions.
 
-Functional programming languages solve this problem by eliminating side effects
-like mutation of variables in a function, which prevent functions to be run in
-parallel, since the output of one function might depend on the variable being mutated.
-This means that functional languages could be easier to parallelize and therefore
-become very important in the future.
+Functional programming languages solve this problem, because they eliminate side effects
+like mutation of variables in a function entirely, which would otherwise prevent functions to be run in
+parallel, since the order those side effects happen in, might matter.
+This means that programs in functional languages are easier to parallelize and therefore
+these languages could become very important in the future.
 
-The main goal of this project was therefore to devise a functional language
+The main goal of this project was to devise such a functional language
 and create an implementation of it.
 The principal aim for the syntax of the language was then to keep it simple,
-so it could be used to show and explain the concept of functional languages.
+so the focus could lie more on the implementation instead of language design.
+To that end it was also the goal to have strict immutability and no loops.
 Another aim was to create this implementation with as few dependencies as possible
-in order to learn all the basics from scratch.
+in order to learn all the basics from scratch and for the language to be fully
+cross-platform.
 
-This language was to be called Imp for Impure, as Input/Output is allowed in this language
+The language was later decided to be called Imp for Impure,
+as Input/Output is allowed in this language
 without distinguishing functions using it from functions that do not.
 
 \section{Fundamentals}
 Though programming languages can be very different,
 the elementary steps taken in each implementation are
-still mostly the same.
+still mostly the same for all languages, no matter the paradigm.
 
-These next paragraphs explain the basic knowledge needed
+These next paragraphs explain this basic knowledge needed
 to understand the structure of this project.
 
 \subsection{The Lexer}
 The first step of a programming language implementation is almost always the lexer.
-It is responsible for splitting up the source code into tokens, little chunks like the name of a variable or a statement.
-This can most often be done in one single loop over the code.
-In the implementation of Imp, this is the case.
+It is responsible for splitting up the source code into tokens,
+which are little chunks like the name of a variable or a statement.
 These tokens can then be used as input for the parser.
 
 \subsection{The Parser}
 The Parser of a programming language is responsible for ensuring the syntax is correct and, in most cases,
-building an Abstract Syntax Tree (AST) out of the tokens.
+building a tree out of the tokens, called Syntax Tree.
 This can be done in many ways, though what methods are applicable
 depend on the syntax of the language.
 \subsubsection{Pratt Parsing}
 Pratt Parsing \autocite{prattTopOperatorPrecedence1973}
-is the method that is used for the expressions in this language.
+is one of the most common algorithm for parsing languages.
 It works with a list of rules for what to do when a certain type of token is encountered
 either at the start or in the middle of an expression.
+It works like this:
 When parsing an expression using this method,
 it starts with the right-binding power of 0.
+The right-binding power represents how strong
+the preciding operator (if any) binds to the expression
+on its right.
 
 Then the first type of token is looked up
 in the list of rules for the start
-(in the null denotation, as it's called in the paper).
-This results in a function which is then called
+(to get the null denotation, as it is called in the paper).
+This lookup results in a function which is then called
 which parses the expression starting with this token.
 For example, if this is a negation, it also parses the argument
-by recursively calling the expression function again.
+by recursively calling the expression function again with an
+appropriate right-binding power.
 Once this prefix is parsed the algorithm enters a loop:
 \begin{enumerate}
 	\item \label{start}
@@ -115,13 +122,17 @@ Once this prefix is parsed the algorithm enters a loop:
 	\item If there is no function listed or
 	      the left-binding power stored is less or equal
 	      to the right-binding power, return the current expression
+	      as the operator preceding the current expression binds
+	      too strongly, meaning the current operator has a lower precedence.
+	      It will be parsed as soon as a call with a low enough
+	      right-binding power is reached.
 	\item Otherwise, call the parsing function listed with the current expression
-	      and store the result back in the current expression
+	      (its left) and store the result back in the current expression
 	\item Return to step \ref{start}.
 \end{enumerate}
 For infix operators like multiplication, this parsing function
 will call the expression function again, but with a higher right-binding power
-so as to ensure for example that addition can't be parsed in a product,
+so as to ensure for example that addition cannot be parsed in a product,
 since the left binding power of addition is less than
 the right-binding power of multiplication,
 which is the way precedence is solved by this algorithm.
@@ -130,7 +141,7 @@ is calculated left-to-right or right-to-left.
 
 \subsection{Type Checking/Inference}
 After the program has been parsed, there traditionally follows
-a semantic analysis step. This step most often consists of a type checker
+a semantic analysis step. This step most often consists of at least a type checker
 (if the language is typed) and an optimizing step.
 
 The Type Checking step ensures that all programs are well-typed,
@@ -139,36 +150,62 @@ be done, so no runtime type error can occur as it does in dynamically typed
 languages like Python.
 
 \subsubsection{Hindley-Milner type inference}
-The Hindley-Milner type inference, as described in
+The Hindley-Milner type inference algorithm, as described in
 \autocite{damasPrincipalTypeschemesFunctional1982}
-is originally a way to determine types for functions in the
+is originally a way to determine types for functions in a
 polymorphic lambda calculus with an addition of let expressions.
 
-\paragraph{Polymorphic Lambda Calculus}
-The Polymorphic Lambda Calculus is a simple model for computation.
+\paragraph{Lambda Calculus}
+The Lambda Calculus is a simple model for computation.
 The only operations that are possible are:
 \begin{itemize}
 	\item $\lambda x.\:e$,
 	      which creates a function where $x$ is the name of the argument
-	      and $e$ is an expression that is given as a result
+	      and $e$ is an expression whose value is returned if called
 	\item $x$, where $x$ is the name of a variable
 	      and the result is the value of that variable
 	\item $e_1\:e_2$, where both $e_1$ and $e_2$ are expressions and the result
 	      is the result of the call of function $e_1$ with argument $e_2$\item $c$, where $c$ is a constant
-	\item $let\:x = e_1\:in\:e_2$, where x is the name of the variable
-	      which is defined to be the result of expression $e_1$ in the scope of expression $e_2$\end{itemize}
+\end{itemize}
+
+For the Hindley-Milner type inference algorithm to work,
+$let\:x = e_1\:in\:e_2$ is introduced, where x is the name of the variable
+which is defined to be the result of expression $e_1$
+and the whole expression results in expression $e_2$,
+when $x$ is substituted by $e_1$.
+The reason this is needed is because polymorphism is constrained
+to such variables, enabling the algorithm to always infer the types
+in a well-typed program.
 
 \subsubsection{The Inference Algorithm}
 The Hindley-Milner type inference algorithm computes the types of expressions
+of this variation of lambda calculus
 by essentially first assuming a maximally generic type and refining it step by step
 using information like the operations used (e.g. function calls).
-If there turns out to be no type possible, the program is not well-typed.
-Important for the type system to work is the definition that only let-defined variables
-can be polymorphic (i.e. can take on multiple different types).
+
+The types it assigns are:
+\begin{itemize}
+	\item $a$, where $a$ represents any type and is called a type variable
+	\item $P$, where $P$ is any primitive type like Int or Float, and
+	\item $\tau \rightarrow \tau$, where $\tau$ is any type, representing
+	      a function with the type of its argument and result
+\end{itemize}
+
+Finally the type assigned to a let can also be
+$\forall \vec{a}.\:\tau$, meaning the value assigned
+can have the type $\tau$, no matter what the value of the variables contained in $\vec{a}$ are.
+
+Refining the type is done through a procedure called unification,
+which tries to find possible substitutions for type variables that would make two
+types equal. This is done for instance when inferring the type of a call,
+as the type of the function being called must match
+the type of its argument.
+If there is no way to substitute type variables
+to unify the two types, the program is not well-typed.
 
 \subsection{The Optimizer}
-The next step in the semantic analysis step is in most languages an optimizing step.
-This is done in many passes over the code in most languages. The type of optimizations
+The next substep in the semantic analysis step for most language implementations is an optimizing step.
+This is done in a succession of (possibly many) passes over the code in most languages. The type of optimizations
 possible depend on how the program is executed, whether the language is typed,
 sometimes also depending on the target machine and many other aspects.
 
@@ -198,7 +235,7 @@ faster than ones run by interpreted languages, thanks to directly being able to 
 optimizations in the CPU, which can be used since the program is specific
 and not general like an interpreter.
 
-Many compilers nowadays don't directly convert the code to machine code,
+Many compilers nowadays do not directly convert the code to machine code,
 but depend on a backend. One of the most popular backends is \textbf{LLVM}.
 
 \subsubsection{LLVM}
@@ -217,35 +254,33 @@ for C, which many languages can interact with.
 
 The Software was developed using the Editors Visual Studio Code and Zed.
 Zed was used primarily, with VSCode used for features like Debugging
-that didn't work fully in Zed.
+that did not work fully in Zed.
 
 The Programming Language itself was implemented in Zig, a new low-level programming
-language that aims to improve on C. Zig was used in this project, since it has builtin
+language that aims to improve on C. Zig was used in this project, since it has built-in
 support for tagged unions and a build system. Tagged Unions were deemed important because they
-enhance type safety for things like the AST because of the different node types.
+enhance type safety for things like the syntax tree because of the different node types.
 However, for the compiler, C was still used for
-a few builtin functions.
+a few built-in functions.
 
 LLVM was used as a tool to compile Imp to machine code while the
 Boehm-Demers-Weiser garbage collector \autocite{GarbageCollector} was
 used to manage memory in the compiler.
 
 For the ability to syntax highlight code in Imp, an additional parser was made using tree-sitter.
-This parser is written in JavaScript. Since the grammar of the language is too complex,
-a custom lexer was also needed, which itself was written in C.
-To state what parts of the code should be colored how, Queries had to be written as well,
+This parser is written in JavaScript. Since the grammar of the language is hard to write using
+the parser options present, a custom lexer was also implemented, which itself was written in C.
+To state what parts of the code should be colored how, queries had to be written as well,
 which are written in an unnamed language unique to Tree-sitter.
-
 Highlighting with Tree-sitter was chosen specifically since it is used
 in the editor Zed, enabling a custom extension to be written for Imp.
 
 This article itself was written in LaTex, while the listings were generated
-by chromacode\autocite{lebedaTomLebedaChroma_code2025}.
+by chromacode\autocite{lebedaTomLebedaChroma_code2025}, reusing the tree-sitter parser.
 
 
 \subsection{The Language}
 \importListing{code/either.tex}
-\importListing{code/foldl.tex}
 
 The Syntax of the language consists of statements and expressions.
 
@@ -288,26 +323,53 @@ The types of expressions that exist are:
 
 Comments start with a $\#$ sign and end with the end of the line.
 
+Builtin types exist for linked lists, including syntax sugar so that
+they can be created using the syntax $[a, b, c, ...]$ and lists of characters
+using the syntax $"abc..."$, as well as optionals which are used for
+values that might not exist, as well as to represent potential failure,
+and a special type Void that doesn't contain any information and is there to
+be used if no real result is expected.
+
+There exist only a few built-in functions, namely
+$showInt$ and $showFloat$, which convert integers and floating point numbers
+into strings, or rather lists of characters, and the converses $parseInt$ and
+$parseFloat$ which return an Option of type Int or Float respectively.
+Lastly $print$ and $read$ exist and read from standard input, returning a list
+of characters or write to standard output given a list of characters.
+
+\importListing{code/foldl.tex}
+
 An example of code in this language is the fold left function
 given in Listing \ref{listing:foldl}.
 
 \subsection{The Lexer}
 The lexer of Imp is a simple single-pass lexer, that computes
-the tokens on-demand. This is done to avoid additional memory
-allocations other than creating the AST.
+the tokens on-demand. This is done to avoid memory
+allocations other than creating the syntax tree.
+Its state consists of solely its
+current position in the source text as well as the start
+of the current token.
+
+The tokens generated contain full information
+about their location in the source code.
 
 \subsubsection{Token Types}
+The types of tokens that are returned by the lexer are:
 \begin{itemize}
 	\item The Keywords $let$ and $in$, $lambda$, $if$, $then$ and $else$,
 	      $case$ and $of$, $or$, and $and$,
-	\item The special characters $.$, $=$, $:$, $($ and $)$, $[$ and $]$
-	\item The special sequences $->$ and $=>$,
+	\item the special characters $.$, $=$, $:$, $($ and $)$, $[$ and $]$
+	\item the special sequences $->$ and $=>$,
 	\item all operators for comparison and mathematical operations,
-	      and the special operator $;$,
+	      and the special operator $;$ which discards the first argument,
 	\item Numbers, Booleans, Characters and Strings,
-	\item Identifiers,
+	\item Identifiers, which start with a letter and
+	      then continue using alphanumeric characters or underscores,
 	\item and Special Tokens for new lines and the end of the file
 \end{itemize}
+
+This means that all keywords are reserved and cannot be used
+for the name of a variable.
 
 \subsection{The Parser}
 \importListing{code/expressions.tex}
@@ -319,18 +381,48 @@ $getNud$ and $getLed$.
 The problem that there might not be an entry is solved by returning null
 in that case.
 
+Precedence for operators in $getLed$ is the following:
+The most precedence of all operators is assigned to the $^$ operator for exponentiation,
+followed by $*$ and $/$, which have equal precedence and finally $+$ and $-$ with equal
+precedence as well. This is done to match precedence as known in mathematics.
+Following these mathematic operators in precedence are the comparison operators
+$<$, $<=$, $==$, $>=$ $>$, all with the same precedence.
+The least precedence of all operators is assigned to $;$.
+
+$getLed$ specifically has the special case that all token types that are present in $getNud$
+can be the start of an argument given to the expression parsed before, since calls are
+made just by juxtaposition. This special rule has the highest precedence of all expression types
+so that the result of two functions can be combined using an operator without parentheses.
+
 \subsection{Type Checking/Inference}
-The Type Checker is also mostly an implementation close to the Algorithm J as described
-in the paper \autocite{damasPrincipalTypeschemesFunctional1982}
+The Type Checker is mostly implemented close to how the Algorithm J as described
+by Damas and Milner\autocite{damasPrincipalTypeschemesFunctional1982} works.
 There is however a significant difference to the original type system:
-There exists a special type Number(a), which can be either a Float or an Int
-and therefore can be unified by them Both. When unified, the runtime representation
+There exists a special type Number(a), which represents either a Float or an Int
+and therefore can be unified with both. When unified, the runtime representation
 is then Number(Int) or Number(Float).
-It is printed similarly to how Type Class constraints are in Haskell.
-This means that the type Number(a) is printed as \texttt{Number a => a}.
-However, in order to be able to compute free type variables for generalization
+
+\importListing{code/unify.tex}
+
+This Logic is contained in the unification function outlined
+in listing \ref{listing:unify} on line 18-19. It takes advantage of the logic
+on lines 3-12 which unifies a generic type variable with any type.
+
+The constrained Number(a) is printed similarly to how Type Class
+constraints are shown in Haskell, namely the type Number(a) is printed as
+$Number\:a => \tau$.
+
+The most significant change to the Algorithm J itself however
+lies in the fact that in order to be able
+to compute free, meaning independent, type variables for generalization
 faster, levels as described in \autocite{EfficientInsightfulGeneralization2022} are
 used. However, they are called depth in the code.
+These levels are assigned to new type variables based on how many let statements and expressions
+deep the algorithm is currently and are corrected if unified with a variable of lesser depth.
+If a type variable contained in the type of a variable assigned via a let statement or expression
+has a higher depth than at the start of parsing this let statement or expression, the type variable must be
+independent since it can't depend on a type of something from outside, like an argument to a function, otherwise
+it would have had a lesser depth.
 
 \subsection{The Optimizer}
 \importListing{code/optimizer.tex}
@@ -338,44 +430,62 @@ used. However, they are called depth in the code.
 The Optimizer works slightly different depending on whether
 the code is interpreted or compiled. In the case that it is interpreted
 the optimizer also combines lambdas into larger objects,
-while the compiler doesn't need this. However, in both cases
-a list of bound variables is gathered per function definition,
-since all functions are closures.
+while the compiler can't work with this combined representation.
+However, in both cases a list of bound variables is gathered per function definition,
+needed since all functions are closures in Imp.
 The outline of the optimizer is shown in Listing \ref{listing:optimizer}.
 
+All run functions of each step
+
 \subsection{The Interpreter}
-The Interpreter is a simple tree-walking Interpreter,
-meaning it directly uses the AST to run the code.
+The Interpreter is a simple tree-walking Interpreter.
 The most important optimization it employs is proper tail call elimination,
-meaning it doesn't make another stack frame if the function call is the last
+meaning it doesn't make another stack frame if a function call is the last
 thing a function does, making recursion feasible through
-tail recursion. This is done by creating a simple form of trampolining,
-where the evaluation of an expression returns the next thing to
-do, which is then repeatedly evaluated in a loop until the final result
-is reached.
+tail recursion. This function doesn't need to be the function in whose body the
+execution is currently in. This is done by having the evaluation of an expression return
+the next part of the syntax tree to evaluate, which is then repeatedly evaluated in a loop until the final result
+is reached, removing additional tail calls on the stack.
+
+Additionally, based on the combined lambdas and calls from the optimizer, it can
+essentially treat consecutive lambdas like defining a single, multi-argument
+function, avoiding to build up a huge call stack, resulting in less allocations
+and faster execution in most cases.
 
 \subsection{The Monomorphizer}
 The Monomorphizer is a step only needed for the compiler.
-It essentially eliminates all polymorphism by duplicating
-the value for each type.
+First it replaces all instances of free, non-bound type variables
+with the type of Int. This is needed because for example the empty list
+can have the type of $List\:a$ for any $a$, but the conversion to LLVM IR later on still needs a concrete
+type to determine the correct representation.
 
-This is done by a simple pass over the AST, gathering
-all the types a value takes on in the body of each let expression
-or in the rest of the file and then copies the AST of the definition once for each
-type.
+Once this replacement is done, it essentially eliminates all polymorphism by duplicating
+the value assigned to each $let$ for each type it takes on
+in the code of the program. This can be done because
+in the Hindley-Milner type system, every value
+can only take on a finite number of types and is needed later on
+because LLVM doesn't allow polymorphism.
+
+The whole transformation is done by a simple pass over the syntax tree, gathering
+all the types a value takes on in the body of each let expression,
+or in the rest of the file, in case of a let statement or a type declaration,
+getting the instantiation of the $\forall\vec{a}$ back by comparing the generic
+with the specific type.
+Once all instantiations are gathered, it copies the syntax tree of the definition once each.
 
 This method is essentially the same as MLTon uses.\autocite{Monomorphise}
 
 \subsection{The Compiler}
 The Compiler converts then converts this
-monomorphic AST into LLVM IR using the C API of LLVM through
+monomorphic syntax tree into LLVM IR using the C API of LLVM through
 Zigs automatically generated FFI.
 
 Closures are represented in the IR as a struct consisting of two pointers:
 The first being the function pointer, the second being a pointer to the heap
 where all bound variables are stored.
 
-The Functions itself take two arguments each: Their actual argument
+The functions generated and pointed to in the closure
+take two arguments each: Their actual argument
 as declared by the source code, and the environment that had been stored
 at the time of the closures creation.
 
@@ -386,7 +496,7 @@ the tail recursion optimization as it could not resolve the indirect function ca
 as a recursive call since it would be given via an argument and therefore
 could theoretically be different.
 
-Then clang is called on the IR, linking it with a very small library of builtin
+Then clang is called on the IR, linking it with a very small library of built-in
 functions with the highest optimization level of -O3. The tool therefore requires
 clang to be present and on the PATH.
 
@@ -404,7 +514,7 @@ can be viewed as a loop which changes the variables $previous$, $current$ and
 $n$ on each iteration. This change is done on line 6.
 
 Throughout its execution, it also prints the current fibonacci number
-computed using the two builtin functions $showInt$ and $print$.
+computed using the two built-in functions $showInt$ and $print$.
 $showInt$ is a function that converts an integer into a list of characters.
 
 Several expressions are separated by a semicolon ($;$) which is an operator
@@ -427,10 +537,10 @@ because no types did ever need to be annotated for the code to work,
 but it is still garanteed that the whole program has no type errors.
 The type given to fibonacciHelper is only there for clarity.
 
-Other examples of Imp code can be found in the folder examples of
-in the source code.
+Other examples of Imp code can be found in the folder $examples$ in
+the source code.
 
-To get a view of how the LLVM IR transformation might work, here is
+To get a view of how the LLVM IR transformation works, here is
 an example of the resulting IR of a simple function,
 though cleaned up to remove clutter and add meaningful names.
 
@@ -439,7 +549,7 @@ though cleaned up to remove clutter and add meaningful names.
 	\input{code/addLLVM.tex}
 \end{minipage}
 
-So the first lambda defined on line 2 of Listing \ref{listing:addImp} got transformed
+The first lambda defined on line 2 of Listing \ref{listing:addImp} got transformed
 into the function $@add$ of Listing \ref{listing:addLLVM}.
 As the second lambda binds the value of $x$, $@add$ allocates
 enough memory to store it on lines 3-5, then gets the exact location on line 6, which
@@ -448,15 +558,16 @@ Line 7 then stores $x$ while line 8 creates the closure by inserting the pointer
 variable in a struct.
 Finally on line 9, the closure is returned.
 
-The function $@add_const$ then acesses this bound variable, again first getting the
+The function $@add_const$ then accesses this bound variable, again first getting the
 location on the redundant line 14, then loads the actual value of $x$ on line 15
 and finally computes the result on line 16 which is returned on line 17.
-
-This IR will then get optimized in the final compilation by clang,
-oftentimes eliminating the indirect function call through the closure.
 \section{Discussion}
-As seen in the example given, the language is fully functional and
-can be used for mathematical computation. However, there are also several
+As seen in the example given, the language
+can be used for mathematical computation.
+Both the interpreter and compiler are also relatively fast and
+(with a minor caveat) memory-safe.
+
+However, there are also several
 shortcomings that will be mentioned here.
 
 \subsection{Shortcomings}\label{shortcomings}
@@ -493,7 +604,7 @@ written in other languages at all, meaning GUIs or even most TUIs
 (terminal user interfaces) are impossible to create,
 since you couldn't use libraries like QT.
 
-This could be mitigated by a large set of builtin functions based
+This could be mitigated by a large set of built-in functions based
 on which a standard library could be built, or more simply, though
 less securely, using an FFI (foreign function interface).
 
@@ -517,9 +628,8 @@ are all supported by them both.
 
 Windows has however the problem of there not being
 a prebuilt package for LLVM which includes the headers as well
-as the libraries to be linked. This means that any
-user on windows wanting to try the compiler
-must first build LLVM for himself at the moment.
+as the libraries to be linked and doesn't depend on MSVC and its
+implementation of the C/C++ standard libraries.
 
 \subsection{Room for improvement}
 There are many parts of both the compiler and the
@@ -536,11 +646,12 @@ is in fact a pointer.
 Meanwhile, the interpreter uses a very basic mark-and-sweep
 Garbage Collector. However this could very easily be improved
 by using methods like Generational Garbage Collection, where
-young objects are checked more often than older ones.
+young objects are checked more often than older ones, which are more
+likely to live for the entirety of the program.
 
 \subsubsection{Defunctionalization}
 Furthermore, another possible optimization done by almost all
-functional programming languages nowadays, is some form of
+functional programming languages nowadays is some form of
 defunctionalization, which is a process which tries
 to eliminate functions as arguments, replacing them with
 an object that is given as an argument which denotes which
@@ -554,13 +665,22 @@ since it assumes a Hindley-Milner style type inference
 as well.
 
 \section{Conclusions}
-In conclusion, all the goals were met and the project was a success.
+In conclusion, almost all the goals were met.
 Though there were a few roadblocks, especially concerning LLVM,
 the language is now fully functional and able to be tested by anyone.
 There are a few aspects that would need to be improved for it to be
 useful for anything practical as explained in section \ref{shortcomings},
-it is already a fully useable language that could be used as a teaching
-tool.
+but it is already a fully useable language.
+
+However, the goal for the language to be cross-platform has not really been met,
+as while the Interpreter is theoretically working on all systems supported by zig
+that have a file system and a standard in- and output, the compiler only works on
+Linux at the moment. This would however be possible to fix with enough time and
+computing power, as most likely all that is really needed is to build LLVM from
+source using the Zig compiler as the C compiler.
+
+The language created could now be used as a starting point for a more useful and
+feature-rich language.
 
 \newpage
 \printbibliography
@@ -569,6 +689,9 @@ tool.
 
 \appendix
 \section{Source Code}
-The source code for this project can be found at: \href{https://github.com/enmiligi/matura-project}{GitHub}
+The source code for the compiler and interpreter can be found on
+\href{https://github.com/enmiligi/matura-project}{GitHub}.
+The tree-sitter parser can be found \href{https://github.com/enmiligi/tree-sitter-imp}{here}
+and the extension for Zed enabling syntax highlighting is located \href{https://github.com/enmiligi/zed-imp}{here}.
 
 \end{document}
