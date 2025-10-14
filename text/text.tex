@@ -1,6 +1,7 @@
 \documentclass[12pt]{article}
 \usepackage{amsmath}
 \usepackage{hyperref}
+\usepackage{url}
 \usepackage[onehalfspacing]{setspace}
 \usepackage[top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm]{geometry}
 \usepackage{mathptmx}
@@ -9,20 +10,49 @@
 \usepackage{xcolor}
 \usepackage{listings}
 \usepackage{dirtree}
+\usepackage{tabularx}
+\usepackage[automake]{glossaries-extra}
+\usepackage{graphicx}
+\usepackage{float}
+
 
 \hypersetup{
       colorlinks=true,
 }
 \setlist{nosep}
 
+\makeglossaries
+
+
+\newglossaryentry{llvm}
+{
+    name=LLVM,
+    description={LLVM (originally standing for Low Level Virtual Machine) is a system
+    of compilers and toolchains and software to create them.}
+}
+
+\newglossaryentry{taggedUnion}
+{
+    name={tagged unions},
+    description={Tagged Unions are types whose values can contain several different
+    types of which the current type is signified by a value (the tag).}
+}
+
+\newabbreviation{ir}{IR}{Intermediate Representation}
+\newabbreviation{wasm}{WASM}{Web Assembly}
+\newabbreviation{vscode}{VSCode}{Visual Studio Code}
+\newabbreviation{gc}{GC}{Garbage Collector}
+\newabbreviation{api}{API}{Application Programming Interface}
+\newabbreviation{ffi}{FFI}{Foreign Function Interface}
+
 \addbibresource{bibliography.bib}
 
-\title{A functional programming language\\Maturaarbeit}
+\title{Creation of a functional programming language\\Maturaarbeit}
 \author{Enea Giger\\Betreuungsperson: Adrian Lüthi}
 \date{Gymnasium Burgdorf\\\today}
 
 \newcommand{\importListing}[1]{
-    \begin{minipage}{\linewidth}
+    \begin{minipage}{\textwidth}
     \input{#1}
     \end{minipage}
 }
@@ -33,7 +63,7 @@
 	This paper describes the creation of a new functional programming language called Imp
 	and both an interpreter and a compiler for it from scratch.
 	It describes the essential architecture and algorithms used for those
-	implementations including transformation to LLVM IR and tail call optimization.
+	implementations including transformation to \Gls{llvm} \gls{ir} and tail call optimization.
 	The language itself is aimed to be relatively simple
 	and is written almost exclusively in the relatively new language
 	Zig.
@@ -61,6 +91,15 @@ parallel, since the order those side effects happen in, might matter.
 This means that programs in functional languages are easier to parallelize and therefore
 these languages could become very important in the future.
 
+The removal of side effects is due to functional programming languages being based
+on mathematical functions, which give the same result each time, if the input is the same.
+This is in contrast to imperative programming languages whose functions are
+actually procedures, step by step instructions, that depend on the current state.
+Instead of loops, recursion is used in functional languages like in mathematics.
+Functional programming languages also have first-class functions, meaning
+all functions are values and can therefore be passed around to other functions
+or stored in variables.
+
 The main goal of this project was to devise such a functional language
 and create an implementation of it.
 The principal aim for the syntax of the language was then to keep it simple,
@@ -74,6 +113,7 @@ The language was later decided to be called Imp for Impure,
 as Input/Output is allowed in this language
 without distinguishing functions using it from functions that do not.
 
+\newpage
 \section{Fundamentals}
 Though programming languages can be very different,
 the elementary steps taken in each implementation are
@@ -221,7 +261,7 @@ language. There are many types of interpreters:
 	\item \textbf{Threaded Interpreters}, where there is no byte sequence, but pointers
 	      to functions to be called or the next instruction. This has the problem that there
 	      are many indirect calls and pointer indirections being done, reducing the speed.
-	\item \textbf{Abstract-Syntax-Tree Interpreters}, which directly evaluate the tree,
+	\item \textbf{Tree-Walking Interpreters}, which directly evaluate the tree,
 	      which has more information available, but might not be optimal because of syntax
 	      nodes which need to be skipped and there are more pointer indirections than
 	      \textbf{Byte-Code Interpreters}
@@ -236,14 +276,13 @@ optimizations in the CPU, which can be used since the program is specific
 and not general like an interpreter.
 
 Many compilers nowadays do not directly convert the code to machine code,
-but depend on a backend. One of the most popular backends is \textbf{LLVM}.
+but depend on a backend. One of the most popular backends is \Gls{llvm}.
 
 \subsubsection{LLVM}
-\textbf{LLVM}, which originally stood for Low Level Virtual Machine, is
-a backend capable of converting a custom language called
-LLVM IR (Intermediate Representation) into code for several targets,
+The \Gls{llvm} Project, contains a backend capable of converting a language called
+\Gls{llvm} \Gls{ir} into code for several targets,
 like x86-based cpus (most Intel and AMD chips), ARM-based cpus, but also
-WASM (Web Assembly, a language understood by browsers).
+\Gls{wasm}, which is understood by browsers.
 
 It is coded in C++, though bindings exist for several languages, most notably
 for C, which many languages can interact with.
@@ -252,19 +291,19 @@ for C, which many languages can interact with.
 
 \subsection{Used Software}
 
-The Software was developed using the Editors Visual Studio Code and Zed.
-Zed was used primarily, with VSCode used for features like Debugging
+The Software was developed using the Editors \Gls{vscode} and Zed.
+Zed was used primarily, with \Gls{vscode} used for features like Debugging
 that did not work fully in Zed.
 
 The Programming Language itself was implemented in Zig, a new low-level programming
 language that aims to improve on C. Zig was used in this project, since it has built-in
-support for tagged unions and a build system. Tagged Unions were deemed important because they
+support for \gls{taggedUnion} and a build system. \Gls{taggedUnion} were deemed important because they
 enhance type safety for things like the syntax tree because of the different node types.
 However, for the compiler, C was still used for
 a few built-in functions.
 
-LLVM was used as a tool to compile Imp to machine code while the
-Boehm-Demers-Weiser garbage collector \autocite{GarbageCollector} was
+\Gls{llvm} was used as a tool to compile Imp to machine code while the
+Boehm-Demers-Weiser \Gls{gc} \autocite{GarbageCollector} was
 used to manage memory in the compiler.
 
 For the ability to syntax highlight code in Imp, an additional parser was made using tree-sitter.
@@ -275,8 +314,8 @@ which are written in an unnamed language unique to Tree-sitter.
 Highlighting with Tree-sitter was chosen specifically since it is used
 in the editor Zed, enabling a custom extension to be written for Imp.
 
-This article itself was written in LaTex, while the listings were generated
-by chromacode\autocite{lebedaTomLebedaChroma_code2025}, reusing the tree-sitter parser.
+This article itself was written in LaTeX, while the listings were generated
+by chromacode \autocite{lebedaTomLebedaChroma_code2025}, reusing the tree-sitter parser.
 
 
 \subsection{The Language}
@@ -341,6 +380,19 @@ of characters or write to standard output given a list of characters.
 
 An example of code in this language is the fold left function
 given in Listing \ref{listing:foldl}.
+
+\subsection{The Structure}
+The structure of the implementation is as follows:
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=\textwidth]{diagrams/DataFlow.png}
+	\caption{Data Flow of the Implementation}
+\end{figure}
+The data from the file with the source code goes through the lexer,
+parser, type inference and optimizer no matter what, and then depending
+on if the program should be compiled it goes through the monomorphizer and
+the compiler instead of the interpreter. This logic is done at the time of compilation
+of the implementation instead of at runtime by the build script.
 
 \subsection{The Lexer}
 The lexer of Imp is a simple single-pass lexer, that computes
@@ -473,14 +525,17 @@ getting the instantiation of the $\forall\vec{a}$ back by comparing the generic
 with the specific type.
 Once all instantiations are gathered, it copies the syntax tree of the definition once each.
 
-This method is essentially the same as MLTon uses.\autocite{Monomorphise}
+This method is essentially the same as the programming language implementation MLTon uses.\autocite{Monomorphise}
 
 \subsection{The Compiler}
-The Compiler converts then converts this
-monomorphic syntax tree into LLVM IR using the C API of LLVM through
-Zigs automatically generated FFI.
+The Compiler then converts this
+monomorphic syntax tree into \Gls{llvm} \Gls{ir} using the C \Gls{api} of LLVM, which
+makes the creation of LLVM IR possible from C instead of C++ through
+Zigs automatically generated \Gls{ffi}. Zigs \Gls{ffi} allows it to call
+C functions directly by automatically generating the correct bindings using the
+headers.
 
-Closures are represented in the IR as a struct consisting of two pointers:
+Closures are represented in the \Gls{ir} as a struct consisting of two pointers:
 The first being the function pointer, the second being a pointer to the heap
 where all bound variables are stored.
 
@@ -489,22 +544,21 @@ take two arguments each: Their actual argument
 as declared by the source code, and the environment that had been stored
 at the time of the closures creation.
 
-Here, little is done to optimize the IR created apart
+Here, little is done to optimize the \Gls{ir} created apart
 from recursive calls being done directly instead of through an indirect
 call, as all other function calls are done in order to enable
 the tail recursion optimization as it could not resolve the indirect function call
 as a recursive call since it would be given via an argument and therefore
 could theoretically be different.
 
-Then clang is called on the IR, linking it with a very small library of built-in
+Then clang is called on the \Gls{ir}, linking it with a very small library of built-in
 functions with the highest optimization level of -O3. The tool therefore requires
 clang to be present and on the PATH.
 
 \section{Results}
-Since the language Imp is based on the typed lambda-calculus with recursion,
-it is definitely turing-complete, meaning it can compute everything any other
-language could. For example, it can be used to generate the fibonacci sequence,
-as shown in Listing \ref{listing:fibonacci}.
+Too see how programs in this language look, the following program, which
+can be used to generate the fibonacci sequence,
+will be explained.
 
 \importListing{code/fibonacci.tex}
 
@@ -540,7 +594,7 @@ The type given to fibonacciHelper is only there for clarity.
 Other examples of Imp code can be found in the folder $examples$ in
 the source code.
 
-To get a view of how the LLVM IR transformation works, here is
+Additionally, to get a view of how the LLVM IR transformation works, here is
 an example of the resulting IR of a simple function,
 though cleaned up to remove clutter and add meaningful names.
 
@@ -558,14 +612,40 @@ Line 7 then stores $x$ while line 8 creates the closure by inserting the pointer
 variable in a struct.
 Finally on line 9, the closure is returned.
 
-The function $@add_const$ then accesses this bound variable, again first getting the
+The function $@add\_const$ then accesses this bound variable, again first getting the
 location on the redundant line 14, then loads the actual value of $x$ on line 15
 and finally computes the result on line 16 which is returned on line 17.
+
+To compare the performance of the two implementations with a real-world language,
+a small benchmark was run using a tool called hyperfine\autocite{peterHyperfine2023}.
+Both the Imp and the Python implementation compute and print the mandelbrot set.
+For the compiler, only the compiled program was benchmarked, and not
+the time it takes to compile it. The version of LLVM used was 20.1.8.
+The Python implementation is to compare the Imp language to a language used in
+real-world usecases. It was run using Python 3.12.1.
+All the files being benchmarked can be found in the folder \path{benchmark}.
+
+\begin{table}[H]
+	\centering
+	\begin{tabular}{|l|l|l|l|}
+		\hline
+		Language             & Mean [ms]    & Min [ms] & Max [ms] \\ \hline
+		Imp with Compiler    & 9.7 ± 2.7    & 5.3      & 16.9     \\ \hline
+		Imp with Interpreter & 390.1 ± 16.9 & 362.2    & 421.2    \\ \hline
+		Python               & 57.9 ± 8.0   & 40.1     & 73.7     \\ \hline
+	\end{tabular}
+\end{table}
+
+As can be seen in this table, the language Imp is slower than Python in this case if interpreted,
+but the compiler brought an improvement of approxmately 40x over the interpreter, while Python
+takes almost 6 times the time that the compiled program takes.
+
 \section{Discussion}
 As seen in the example given, the language
 can be used for mathematical computation.
 Both the interpreter and compiler are also relatively fast and
-(with a minor caveat) memory-safe.
+(with a minor caveat) memory-safe. The feasability of this method of
+compilation was shown by the benchmark.
 
 However, there are also several
 shortcomings that will be mentioned here.
@@ -622,7 +702,7 @@ seem to match up.
 
 \subsubsection{OS Compatibility}
 As the Compiler of this language depends on both
-LLVM and Boehm GC, it can only be used on Operating Systems
+LLVM and Boehm \Gls{gc}, it can only be used on Operating Systems
 that support both of these. However, Linux, MacOS and Windows
 are all supported by them both.
 
@@ -630,6 +710,11 @@ Windows has however the problem of there not being
 a prebuilt package for LLVM which includes the headers as well
 as the libraries to be linked and doesn't depend on MSVC and its
 implementation of the C/C++ standard libraries.
+
+However, as Zig doesn't compile parts of the code it sees are not needed,
+LLVM not being available doesn't prevent compilation and execution of the interpreter.
+When building with \texttt{zig build}, it automatically decides whether to use
+the compiler based on the operating system.
 
 \subsection{Room for improvement}
 There are many parts of both the compiler and the
@@ -639,12 +724,14 @@ for enhanced speed and better memory consumption.
 \subsubsection{Garbage Collector}
 Though both the compiler and the interpreter produce
 garbage collected programs, the compiler uses the
-Boehm-Demers-Weiser GC \autocite{GarbageCollector},
+conservative Boehm-Demers-Weiser \Gls{gc} \autocite{GarbageCollector},
 which is unaware of any of the types of Imp and therefore
 has to assume that anything that could be a pointer,
-is in fact a pointer.
+is in fact a pointer. It should therefore be replaced with
+precise \Gls{gc} to prevent leaks caused by values randomly looking
+like pointers.
 Meanwhile, the interpreter uses a very basic mark-and-sweep
-Garbage Collector. However this could very easily be improved
+\Gls{gc}. However this could very easily be improved
 by using methods like Generational Garbage Collection, where
 young objects are checked more often than older ones, which are more
 likely to live for the entirety of the program.
@@ -666,18 +753,15 @@ as well.
 
 \section{Conclusions}
 In conclusion, almost all the goals were met.
-Though there were a few roadblocks, especially concerning LLVM,
-the language is now fully functional and able to be tested by anyone.
+The language is now fully functional and able to be tested by anyone.
 There are a few aspects that would need to be improved for it to be
 useful for anything practical as explained in section \ref{shortcomings},
-but it is already a fully useable language.
+but it is already a useable language.
 
 However, the goal for the language to be cross-platform has not really been met,
 as while the Interpreter is theoretically working on all systems supported by zig
 that have a file system and a standard in- and output, the compiler only works on
-Linux at the moment. This would however be possible to fix with enough time and
-computing power, as most likely all that is really needed is to build LLVM from
-source using the Zig compiler as the C compiler.
+Linux at the moment.
 
 The language created could now be used as a starting point for a more useful and
 feature-rich language.
@@ -685,9 +769,15 @@ feature-rich language.
 \newpage
 \printbibliography
 
+\newpage
 \lstlistoflistings
+\listoffigures
+
+\newpage
+\printglossaries
 
 \appendix
+
 \section{Source Code}
 The source code for the compiler and interpreter can be found on
 \href{https://github.com/enmiligi/matura-project}{GitHub}.
