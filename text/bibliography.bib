@@ -13,15 +13,12 @@
   isbn      = {978-0-89791-065-1}
 }
 
-@article{damasTypeAssignmentProgramming1984,
-  title      = {Type Assignment in Programming Languages},
-  author     = {Damas, Luis},
-  date       = {1984},
-  publisher  = {The University of Edinburgh},
-  url        = {https://era.ed.ac.uk/handle/1842/13555},
-  urldate    = {2025-02-07},
-  langid     = {english},
-  annotation = {Accepted: 2016-01-20T10:03:21Z}
+@online{drawioltdDrawio,
+  title = {Draw.Io},
+  date = {2005},
+  url = {https://www.drawio.com/},
+  urldate = {2025-10-15},
+  organization = {draw.io},
 }
 
 @online{EfficientInsightfulGeneralization2022,
@@ -29,24 +26,6 @@
   date    = {2022-01-09},
   url     = {https://okmij.org/ftp/ML/generalization.html},
   urldate = {2025-03-07},
-  file    = {/home/eneagiger/Zotero/storage/3ZHTU2FA/generalization.html}
-}
-
-
-@article{milnerTheoryTypePolymorphism1978,
-  title        = {A Theory of Type Polymorphism in Programming},
-  author       = {Milner, Robin},
-  date         = {1978-12-01},
-  journaltitle = {Journal of Computer and System Sciences},
-  shortjournal = {Journal of Computer and System Sciences},
-  volume       = {17},
-  number       = {3},
-  pages        = {348--375},
-  issn         = {0022-0000},
-  doi          = {10.1016/0022-0000(78)90014-4},
-  url          = {https://www.sciencedirect.com/science/article/pii/0022000078900144},
-  urldate      = {2025-02-05},
-  abstract     = {The aim of this work is largely a practical one. A widely employed style of programming, particularly in structure-processing languages which impose no discipline of types, entails defining procedures which work well on objects of a wide variety. We present a formal type discipline for such polymorphic procedures in the context of a simple programming language, and a compile time type-checking algorithm W which enforces the discipline. A Semantic Soundness Theorem (based on a formal semantics for the language) states that well-type programs cannot “go wrong” and a Syntactic Soundness Theorem states that if W accepts a program then it is well typed. We also discuss extending these results to richer languages; a type-checking algorithm based on W is in fact already implemented and working, for the metalanguage ML in the Edinburgh LCF system.}
 }
 
 @inproceedings{prattTopOperatorPrecedence1973,
@@ -64,50 +43,9 @@
   isbn      = {978-1-4503-7349-4}
 }
 
-@article{remyEXTENSIONMLTYPE,
-  title    = {{{EXTENSION OF ML TYPE SYSTEM WITH A SORTED EQUATIONAL THEORY ON TYPES}}},
-  author   = {Remy, Didier},
-  abstract = {We extend the ML language by allowing a sorted regular equational theory on types for which uni cation is decidable and unitary. We prove that the extension keeps principal typings and subject reduction. A new set of typing rules is proposed so that type generalization is simpler and more e cient. We consider typing problems as general uni cation problems, which we solve with a formalism of uni cands. Uni cands naturally deal with sharing between types and lead to a more e cient type inference algorithm. The use of uni cands also simpli es the proof of correctness of the algorithm by splitting it into more elementary steps.},
-  langid   = {english}
-}
-
-@inproceedings{sabryContinuationpassingUsefulData1994,
-  title     = {Is Continuation-Passing Useful for Data Flow Analysis?},
-  booktitle = {Proceedings of the {{ACM SIGPLAN}} 1994 Conference on {{Programming}} Language Design and Implementation},
-  author    = {Sabry, Amr and Felleisen, Matthias},
-  date      = {1994-06-01},
-  series    = {{{PLDI}} '94},
-  pages     = {1--12},
-  publisher = {Association for Computing Machinery},
-  location  = {New York, NY, USA},
-  doi       = {10.1145/178243.178244},
-  url       = {https://dl.acm.org/doi/10.1145/178243.178244},
-  urldate   = {2025-02-05},
-  abstract  = {The widespread use of the continuation-passing style (CPS) transformation in compilers, optimizers, abstract interpreters, and partial evaluators reflects a common belief that the transformation has a positive effect on the analysis of programs. Investigations by Nielson [13] and Burn/Filho [5,6] support, to some degree, this belief with theoretical results. However, they do not pinpoint the source of increased abstract information and do not explain the observation of many people that continuation-passing confuses some conventional data flow analyses.To study the impact of the CPS transformation on program analysis, we derive three canonical data flow analyzers for the core of an applicative higher-order programming language. The first analyzer is based on a direct  semantics  of the language, the second on a continuation-semantics of the language, and the last on the direct semantics of CPS terms. All analyzers compute the control flow graph of the source program and hence our results apply to a large class of data flow analyses. A comparison of the information gathered by our analyzers establishes the following points:In view of these results, we argue that, in practice, a direct data flow analysis that relies on some amount of duplication would be as satisfactory as a CPS analysis.},
-  isbn      = {978-0-89791-662-2}
-}
-
-@article{tolmachMLAdaStronglytyped1998,
-  title        = {From {{ML}} to {{Ada}}: {{Strongly-typed}} Language Interoperability via Source Translation},
-  shorttitle   = {From {{ML}} to {{Ada}}},
-  author       = {Tolmach, Andrew and Oliva, Dino P.},
-  date         = {1998-07},
-  journaltitle = {Journal of Functional Programming},
-  shortjournal = {J. Funct. Prog.},
-  volume       = {8},
-  number       = {4},
-  pages        = {367--412},
-  publisher    = {Cambridge University Press (CUP)},
-  issn         = {0956-7968, 1469-7653},
-  doi          = {10.1017/s0956796898003086},
-  url          = {https://www.cambridge.org/core/product/identifier/S0956796898003086/type/journal_article},
-  urldate      = {2025-07-16},
-  abstract     = {We describe a system that supports source-level integration of ML-like functional language code with ANSI C or Ada83 code. The system works by translating the functional code into type-correct, ‘vanilla’ C or Ada; it offers simple, efficient, type-safe inter-operation between new functional code components and ‘legacy’ third-generation-language components. Our translator represents a novel synthesis of techniques including user-parameterized specification of primitive types and operators; removal of polymorphism by code specialization; removal of higher-order functions using closure datatypes and interpretation; and aggressive optimization of the resulting first-order code, which can be viewed as encoding the result of a closure analysis. Programs remain fully typed at every stage of the translation process, using only simple, standard type systems. Target code runs at speeds comparable to the output of current optimizing ML compilers, even though handicapped by a conservative garbage collector.},
-  langid       = {english}
-}
-
 @online{Monomorphise,
   title   = {Monomorphise},
+  date    = {2021-10-21},
   url     = {http://www.mlton.org/Monomorphise},
   urldate = {2025-09-14}
 }
@@ -142,6 +80,8 @@
 
 @online{GarbageCollector,
   title   = {A Garbage Collector for {{C}} and {{C}}++},
+  author = {Boehm, Hans and Demers, Alan and Weiser, Mark},
+  date = {1988},
   url     = {https://www.hboehm.info/gc/},
   urldate = {2025-09-28},
 }
@@ -162,4 +102,49 @@
   urldate = {2025-10-14},
   abstract = {A command-line benchmarking tool},
   version = {1.16.1}
+}
+
+@article{turingComputabilityLdefinability1937,
+  title = {Computability and λ-Definability},
+  author = {Turing, A. M.},
+  date = {1937-12},
+  journaltitle = {The Journal of Symbolic Logic},
+  volume = {2},
+  number = {4},
+  pages = {153--163},
+  issn = {0022-4812, 1943-5886},
+  doi = {10.2307/2268280},
+  url = {https://www.cambridge.org/core/journals/journal-of-symbolic-logic/article/abs/computability-and-definability/FE8B4FC84276D7BACB8433BD578C6BFD},
+  urldate = {2025-10-18},
+  abstract = {Several definitions have been given to express an exact meaning corresponding to the intuitive idea of ‘effective calculability’ as applied for instance to functions of positive integers. The purpose of the present paper is to show that the computable functions introduced by the author are identical with the λ-definable functions of Church and the general recursive functions due to Herbrand and Gödel and developed by Kleene. It is shown that every λ-definable function is computable and that every computable function is general recursive. There is a modified form of λ-definability, known as λ-K-definability, and it turns out to be natural to put the proof that every λ-definable function is computable in the form of a proof that every λ-K-definable function is computable; that every λ-definable function is λ-K-definable is trivial. If these results are taken in conjunction with an already available proof that every general recursive function is λ-definable we shall have the required equivalence of computability with λ-definability and incidentally a new proof of the equivalence of λ-definability and λ-K-definability.A definition of what is meant by a computable function cannot be given satisfactorily in a short space. I therefore refer the reader to Computable pp. 230–235 and p. 254. The proof that computability implies recursiveness requires no more knowledge of computable functions than the ideas underlying the definition: the technical details are recalled in §5.},
+  langid = {english}
+}
+
+@article{churchSetPostulatesFoundation1932,
+  title = {A {{Set}} of {{Postulates}} for the {{Foundation}} of {{Logic}}},
+  author = {Church, Alonzo},
+  date = {1932},
+  journaltitle = {Annals of Mathematics},
+  volume = {33},
+  number = {2},
+  eprint = {1968337},
+  eprinttype = {jstor},
+  pages = {346--366},
+  publisher = {[Annals of Mathematics, Trustees of Princeton University on Behalf of the Annals of Mathematics, Mathematics Department, Princeton University]},
+  issn = {0003-486X},
+  doi = {10.2307/1968337},
+  url = {https://www.jstor.org/stable/1968337},
+  urldate = {2025-10-18}
+}
+
+@software{brunsfeldTreesitterTreesitterV025102025,
+  title = {Tree-Sitter/Tree-Sitter: V0.25.10},
+  shorttitle = {Tree-Sitter/Tree-Sitter},
+  author = {Brunsfeld, Max and Qureshi, Amaan and Hlynskyi, Andrew and ObserverOfTime and Lillis, Will and Vera, Josh and {dundargoc} and Turnbull, Phil and Clem, Timothy and Creager, Douglas and Helwer, Andrew and Rix, Rob and Kavolis, Daumantas and Clason, Christian and Davis, Michael and Bruins, Riley and Delpeuch, Antonin and Ika and Ya, Amin and Nguyễn, Tuấn-Anh and {bfredl} and Brunk, Stafford and Massicotte, Matt and Hasabnis, Niranjan and McCoy, James and Dong, Mingkai and Moelius, Samuel and Kalt, Steven and Kolja},
+  date = {2025-09-22},
+  doi = {10.5281/zenodo.17180150},
+  url = {https://zenodo.org/records/17180150},
+  urldate = {2025-10-18},
+  abstract = {An incremental parsing system for programming tools},
+  organization = {Zenodo},
 }

@@ -578,7 +578,7 @@ pub const AlgorithmJ = struct {
         switch (typeA.data) {
             .typeVar => |*typeVarA| {
                 // If A is a typeVar, unify its substitution if present
-                // else add a Substitution unless 'a' should be replaced with 'a'
+                // otherwise add a Substitution unless 'a' should be replaced with 'a'
                 if (typeVarA.subst) |substitutedA| {
                     try self.unify(substitutedA, typeB);
                 } else {

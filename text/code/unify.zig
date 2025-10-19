@@ -2,7 +2,7 @@ pub fn unify(self: *AlgorithmJ, typeA: *Type, typeB: *Type) !void {
     switch (typeA.data) {
         .typeVar => |*typeVarA| {
             // If A is a typeVar, unify its substitution if present
-            // else add a Substitution unless 'a' should be replaced with
+            // otherwise add a Substitution unless 'a' should be replaced with
             // something containing 'a'
             if (typeVarA.subst) |substitutedA| {
                 try self.unify(substitutedA, typeB);
